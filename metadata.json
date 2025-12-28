@@ -1,0 +1,5 @@
+{
+  "name": "Hexacon",
+  "description": "A strategic turn-based game mixing mechanics from Risk (conquest), Catan (resources), and Stratego (hidden units). Play against a Gemini AI or locally.",
+  "requestFramePermissions": []
+}
