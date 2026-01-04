@@ -51,7 +51,7 @@ const HexTile: React.FC<{
   }
 
   if (!isVisible) {
-      fillColor = '#1e293b'; // Dark color for fog
+      fillColor = '#020617'; // Very Dark color for fog
       stroke = '#0f172a';
   }
 
@@ -87,7 +87,7 @@ const HexTile: React.FC<{
 
   // Render terrain icon
   const TerrainIcon = () => {
-    if (!isVisible) return <EyeOff size={16} className="text-slate-700 opacity-50" />;
+    if (!isVisible) return <EyeOff size={16} className="text-slate-700 opacity-20" />;
     
     // Monolith Icon
     if (tile.structure === StructureType.MONOLITH) {
@@ -99,7 +99,8 @@ const HexTile: React.FC<{
         return <Star size={24} className="text-yellow-400 drop-shadow-[0_0_15px_rgba(234,179,8,0.8)] animate-spin-slow" fill="currentColor" />;
     }
 
-    const iconProps = { size: 16, className: "opacity-40 text-black" };
+    // Light icons for dark background
+    const iconProps = { size: 16, className: "opacity-40 text-slate-200" };
     switch (tile.resource) {
       case 'WOOD': return <Trees {...iconProps} />;
       case 'ORE': return <Mountain {...iconProps} />;
@@ -147,7 +148,7 @@ const HexTile: React.FC<{
       
       {/* Wall Overlay */}
       {isVisible && tile.hasWall && (
-           <polygon points={points} fill="none" stroke="#334155" strokeWidth="6" className="opacity-80" />
+           <polygon points={points} fill="none" stroke="#94a3b8" strokeWidth="6" className="opacity-80" />
       )}
 
       {/* Road Network */}
@@ -298,7 +299,7 @@ export const HexGrid: React.FC<HexGridProps> = ({ gameState, onTileClick, validM
       <svg width="100%" height="100%" viewBox={`${bounds.minX} ${bounds.minY} ${bounds.width} ${bounds.height}`} className="w-full h-full transition-all duration-500 ease-in-out">
         <defs>
             <pattern id="fogPattern" width="4" height="4" patternUnits="userSpaceOnUse">
-                <path d="M-1,1 l2,-2 M0,4 l4,-4 M3,5 l2,-2" stroke="#0f172a" strokeWidth="1" />
+                <path d="M-1,1 l2,-2 M0,4 l4,-4 M3,5 l2,-2" stroke="#1e293b" strokeWidth="1" />
             </pattern>
         </defs>
         

@@ -1,3 +1,4 @@
+
 import { PlayerColor, ResourceType, UnitType, StructureType, TechType } from './types';
 
 export const HEX_SIZE = 40;
@@ -142,11 +143,11 @@ export const INITIAL_RESOURCES: Record<ResourceType, number> = {
 };
 
 export const RESOURCE_COLORS: Record<ResourceType, string> = {
-  WOOD: '#22c55e',   // green-500
-  BRICK: '#ef4444',  // red-500
-  WHEAT: '#eab308',  // yellow-500
-  ORE: '#64748b',    // slate-500
-  WATER: '#3b82f6',  // blue-500
+  WOOD: '#14532d',   // green-900 (Forest)
+  BRICK: '#7f1d1d',  // red-900 (Hills/Badlands)
+  WHEAT: '#854d0e',  // yellow-800 (Fields/Dunes)
+  ORE: '#334155',    // slate-700 (Mountain)
+  WATER: '#1e3a8a',  // blue-900 (Deep Ocean)
 };
 
 export const TERRAIN_TYPE: Record<ResourceType, string> = {
