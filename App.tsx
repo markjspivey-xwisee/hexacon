@@ -2,10 +2,10 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useGameEngine } from './hooks/useGameEngine';
 import { HexGrid } from './components/HexGrid';
 import { GameUI } from './components/GameUI';
-import { UnitType, PlayerColor, Tile, Player, StructureType, Unit } from './types';
-import { Sword, Users, Monitor, Info, Globe, Play, Cloud, RotateCcw, AlertTriangle, Loader2, X, ClipboardCopy, Link as LinkIcon, Share2, Menu, LogIn, Key, BarChart3, Trophy, Skull, HelpCircle, Settings } from 'lucide-react';
+import { UnitType, PlayerColor, Tile, Player, StructureType, Unit, MapType } from './types';
+import { Sword, Users, Monitor, Info, Globe, Play, Cloud, RotateCcw, AlertTriangle, Loader2, X, ClipboardCopy, Link as LinkIcon, Share2, Menu, LogIn, Key, BarChart3, Trophy, Skull, HelpCircle, Settings, Bot, Map, ShieldAlert } from 'lucide-react';
 import { getNeighbors, getHexId } from './utils/hexUtils';
-import { PLAYER_BG_COLORS, PLAYER_COLORS } from './constants';
+import { PLAYER_BG_COLORS, PLAYER_COLORS, FACTION_INFO } from './constants';
 
 const DEFAULT_CONFIG_TEMPLATE = JSON.stringify({
   apiKey: "AIzaSyDXQ5E9E-rcXYauP9o72AJ_OFAxzpt6mZE",
@@ -19,8 +19,8 @@ const DEFAULT_CONFIG_TEMPLATE = JSON.stringify({
 
 const App: React.FC = () => {
   const { 
-    gameState, setupMode, startGame, startOnlineGame, joinGame, resumeLastGame,
-    handleMove, handleConstruct, handleTrade, endTurn, setGameState, isOnline, localPlayerColor,
+    gameState, setupMode, startGame, startOnlineGame, startSpectatorGame, joinGame, resumeLastGame,
+    handleMove, handleConstruct, handleTrade, handleResearch, endTurn, setGameState, isOnline, isSpectatorMode, localPlayerColor,
     matchId, firebaseConfigured, saveFirebaseConfig, resetFirebaseConfig,
     savedMatchId, gameError, isCreatingGame, playerId, syncPlayerId
   } = useGameEngine();
@@ -39,6 +39,7 @@ const App: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 1024);
   const [playerCount, setPlayerCount] = useState(2);
+  const [mapType, setMapType] = useState<MapType>(MapType.PANGAEA);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 1024);
@@ -63,12 +64,12 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!isOnline && !setupMode && gameState.turn > 1) {
         const currentPlayer = gameState.players[gameState.currentPlayerIndex];
-        // If it's an AI player, do NOT show the hotseat overlay.
-        if (!currentPlayer.isAI) {
+        // If it's an AI player (or spectator mode), do NOT show the hotseat overlay.
+        if (!currentPlayer.isAI && !isSpectatorMode) {
              setShowHotseatOverlay(true);
         }
     }
-  }, [gameState.currentPlayerIndex, isOnline, setupMode, gameState.turn, gameState.players]);
+  }, [gameState.currentPlayerIndex, isOnline, setupMode, gameState.turn, gameState.players, isSpectatorMode]);
 
   const { validMoves, validAttacks } = useMemo(() => {
     const moves: string[] = [];
@@ -95,6 +96,8 @@ const App: React.FC = () => {
   };
 
   const handleTileClick = (hexId: string) => {
+    // Disable interactions in spectator mode or combat
+    if (isSpectatorMode || gameState.combatResult) return;
     if (isOnline && gameState.players[gameState.currentPlayerIndex].color !== localPlayerColor) return;
     if (buildItem) {
       handleConstruct(buildItem.id, buildItem.category, hexId);
@@ -202,9 +205,16 @@ const App: React.FC = () => {
                         </section>
                          
                          <section>
-                            <h3 className="text-xl font-bold text-white mb-2">4. Defense & Terrain</h3>
-                            <p>Terrain offers defensive bonuses. Walls add +3 Defense.</p>
-                            <p className="text-sm mt-1">Total Defense = Unit Power + Terrain Bonus + Wall Bonus.</p>
+                            <h3 className="text-xl font-bold text-white mb-2">4. Asymmetric Factions</h3>
+                            <div className="grid grid-cols-2 gap-4 text-xs">
+                                {Object.entries(FACTION_INFO).map(([color, info]) => (
+                                    <div key={color} className={`p-3 rounded border ${PLAYER_BG_COLORS[color as PlayerColor]} text-white border-white/20`}>
+                                        <div className="font-black uppercase">{info.name}</div>
+                                        <div className="font-mono text-[10px] opacity-80">{info.description}</div>
+                                        <div className="mt-1 font-bold">Bonus: {info.bonus}</div>
+                                    </div>
+                                ))}
+                            </div>
                         </section>
                     </div>
 
@@ -284,8 +294,8 @@ const App: React.FC = () => {
             </div>
 
             <div className="bg-slate-800/50 p-4 rounded-2xl border border-slate-700/50 backdrop-blur-sm">
-                <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-3">Number of Players</p>
-                <div className="flex justify-center gap-3">
+                <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-3">World Setup</p>
+                <div className="flex justify-center gap-3 mb-4">
                     {[2, 3, 4].map(num => (
                         <button
                             key={num}
@@ -299,12 +309,29 @@ const App: React.FC = () => {
                         </button>
                     ))}
                 </div>
+                <div className="flex justify-center gap-2">
+                    {Object.values(MapType).map(t => (
+                        <button 
+                            key={t}
+                            onClick={() => setMapType(t)}
+                            className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all
+                                ${mapType === t ? 'bg-indigo-900/50 border-indigo-400 text-white' : 'bg-slate-900 border-slate-800 text-slate-500'}`}
+                        >
+                            {t}
+                        </button>
+                    ))}
+                </div>
             </div>
 
             <div className="grid grid-cols-1 gap-4">
-                <button onClick={() => startGame(playerCount)} className="flex items-center p-5 bg-slate-800 border border-slate-700 hover:border-indigo-500 rounded-2xl transition-all group shadow-lg">
+                <button onClick={() => startGame(playerCount, mapType)} className="flex items-center p-5 bg-slate-800 border border-slate-700 hover:border-indigo-500 rounded-2xl transition-all group shadow-lg">
                     <Monitor className="text-indigo-400 mr-4 group-hover:scale-110 transition-transform" size={28} />
                     <div className="text-left"><span className="block font-bold">vs AI Advisor</span><span className="text-xs text-slate-500">Single Player ({playerCount}P)</span></div>
+                </button>
+
+                <button onClick={() => startSpectatorGame(playerCount, mapType)} className="flex items-center p-5 bg-slate-800 border border-slate-700 hover:border-purple-500 rounded-2xl transition-all group shadow-lg">
+                    <Bot className="text-purple-400 mr-4 group-hover:scale-110 transition-transform" size={28} />
+                    <div className="text-left"><span className="block font-bold">Watch AI Battle</span><span className="text-xs text-slate-500">Spectator Mode (All AI)</span></div>
                 </button>
 
                 <div className="p-5 bg-slate-800 border border-slate-700 rounded-2xl shadow-lg relative overflow-hidden">
@@ -319,7 +346,7 @@ const App: React.FC = () => {
                         <button onClick={() => setShowConfig(true)} className="p-2 text-slate-500 hover:text-white" title="Firebase Settings"><Settings size={18} /></button>
                     </div>
                     {savedMatchId && <button onClick={resumeLastGame} className="w-full py-3 mb-3 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-colors"><RotateCcw size={18} /> Resume Game</button>}
-                    <button onClick={() => startOnlineGame(playerCount)} disabled={isCreatingGame} className="w-full py-3 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold mb-3 flex items-center justify-center gap-2 transition-colors">
+                    <button onClick={() => startOnlineGame(playerCount, mapType)} disabled={isCreatingGame} className="w-full py-3 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold mb-3 flex items-center justify-center gap-2 transition-colors">
                         {isCreatingGame ? <Loader2 className="animate-spin" /> : <Cloud />} {isCreatingGame ? "Creating..." : `Start ${playerCount}P Match`}
                     </button>
                     <div className="flex gap-2">
@@ -343,15 +370,64 @@ const App: React.FC = () => {
   }
 
   const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+  
+  // Combat Overlay Rendering
+  const combat = gameState.combatResult;
 
   return (
-    <div className="flex h-screen bg-slate-950 overflow-hidden flex-col lg:flex-row">
+    <div className="flex h-screen bg-slate-950 overflow-hidden flex-col lg:flex-row relative">
+      {/* Cinematic Combat Overlay */}
+      {combat && (
+          <div className="absolute inset-0 z-[200] bg-black/80 flex items-center justify-center animate-in fade-in duration-200">
+             <div className="w-full max-w-4xl flex items-center justify-between px-12">
+                 {/* Attacker */}
+                 <div className="flex flex-col items-center animate-in slide-in-from-left duration-500">
+                     <div className={`text-4xl font-black mb-4 ${PLAYER_COLORS[combat.attacker.owner]} uppercase`}>ATTACKER</div>
+                     <div className={`w-48 h-64 rounded-2xl ${PLAYER_BG_COLORS[combat.attacker.owner]} flex items-center justify-center shadow-[0_0_50px_rgba(0,0,0,0.5)] border-4 border-white transform rotate-[-2deg]`}>
+                         <div className="flex flex-col items-center text-white">
+                             <Sword size={64} className="mb-2" />
+                             <span className="text-2xl font-bold uppercase">{combat.attacker.type}</span>
+                             <span className="text-6xl font-black mt-4">{combat.attacker.power}</span>
+                         </div>
+                     </div>
+                 </div>
+
+                 <div className="text-6xl font-black text-white italic animate-bounce">VS</div>
+
+                 {/* Defender */}
+                 <div className="flex flex-col items-center animate-in slide-in-from-right duration-500">
+                     <div className={`text-4xl font-black mb-4 ${PLAYER_COLORS[combat.defender.owner]} uppercase`}>DEFENDER</div>
+                     <div className={`w-48 h-64 rounded-2xl ${PLAYER_BG_COLORS[combat.defender.owner]} flex items-center justify-center shadow-[0_0_50px_rgba(0,0,0,0.5)] border-4 border-white transform rotate-[2deg]`}>
+                         <div className="flex flex-col items-center text-white">
+                             <ShieldAlert size={64} className="mb-2" />
+                             <span className="text-2xl font-bold uppercase">{combat.defender.type}</span>
+                             <span className="text-6xl font-black mt-4">{combat.defender.power}</span>
+                             {combat.defender.bonus > 0 && <span className="text-sm bg-black/30 px-2 py-1 rounded mt-2">+{combat.defender.bonus} DEFENSE</span>}
+                         </div>
+                     </div>
+                 </div>
+             </div>
+             
+             {/* Result Banner */}
+             <div className="absolute bottom-32 text-center animate-in zoom-in duration-300 delay-1000 fill-mode-forwards opacity-0" style={{animationDelay: '1.5s'}}>
+                 <div className={`text-8xl font-black tracking-tighter uppercase drop-shadow-2xl 
+                     ${combat.outcome === 'WIN' ? 'text-green-500' : combat.outcome === 'LOSS' ? 'text-red-500' : 'text-slate-400'}`}>
+                     {combat.outcome === 'WIN' ? 'VICTORY' : combat.outcome === 'LOSS' ? 'DEFEATED' : 'STALEMATE'}
+                 </div>
+             </div>
+          </div>
+      )}
+
       {/* Hotseat Curtain */}
       {showHotseatOverlay && (
           <div className="fixed inset-0 z-[200] bg-slate-950 flex items-center justify-center flex-col p-6 animate-in fade-in duration-300">
                <h2 className="text-slate-400 uppercase tracking-widest font-bold mb-4">Turn Change</h2>
                <div className={`text-6xl font-black mb-8 ${PLAYER_COLORS[currentPlayer.color]} drop-shadow-lg`}>
                    {currentPlayer.color}'s TURN
+               </div>
+               <div className="flex flex-col items-center mb-8">
+                    <span className="text-xl font-bold text-white mb-1">{FACTION_INFO[currentPlayer.color].name}</span>
+                    <span className="text-sm text-slate-500">{FACTION_INFO[currentPlayer.color].bonus}</span>
                </div>
                <p className="text-slate-400 mb-8 max-w-xs text-center">Pass the device to {currentPlayer.color}. Don't look at the screen until you are the active player!</p>
                <button 
@@ -456,8 +532,13 @@ const App: React.FC = () => {
                 <button onClick={() => setSidebarOpen(!sidebarOpen)} className="lg:hidden p-3 bg-slate-900/80 backdrop-blur rounded-full shadow-xl border border-slate-700 text-white"><Menu size={24} /></button>
                 <div className={`p-2 px-4 rounded-full border shadow-xl flex flex-col ${PLAYER_BG_COLORS[currentPlayer.color]} border-white/20 transition-colors duration-500`}>
                    <span className="text-[10px] opacity-80 leading-none">Turn {gameState.turn}</span>
-                   <span className="text-xs font-black uppercase">{currentPlayer.color}'s Turn</span>
+                   <span className="text-xs font-black uppercase">{FACTION_INFO[currentPlayer.color].name}</span>
                 </div>
+                {isSpectatorMode && (
+                    <div className="p-2 px-4 rounded-full bg-purple-600 text-white shadow-xl flex items-center gap-2">
+                        <Bot size={16} /> <span className="text-xs font-bold uppercase">Spectator Mode</span>
+                    </div>
+                )}
             </div>
             <div className="pointer-events-auto flex flex-col items-end gap-2">
                 <div className="flex gap-2">
@@ -493,6 +574,7 @@ const App: React.FC = () => {
                 onEndTurn={() => {endTurn(); if(isMobile) setSidebarOpen(false);}} 
                 onBuild={(id, cat) => {handleBuildSelect(id, cat as 'UNIT' | 'STRUCTURE'); if(isMobile) setSidebarOpen(false);}} 
                 onTrade={handleTrade}
+                onResearch={(tech) => {handleResearch(tech); if(isMobile) setSidebarOpen(false);}}
                 onShare={() => {setShowInviteModal(true)}} 
                 onShowStats={() => {setShowStatsModal(true)}}
                 isMobile={isMobile}

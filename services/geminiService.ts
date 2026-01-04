@@ -1,143 +1,267 @@
-import { GoogleGenAI, Type } from "@google/genai";
-import { GameState, AIAction, PlayerColor } from '../types';
-import { UNIT_STATS, STRUCTURE_STATS } from '../constants';
+import { GameState, AIAction, PlayerColor, UnitType, StructureType, TechType } from '../types';
+import { UNIT_STATS, STRUCTURE_STATS, TERRAIN_DEFENSE, RESOURCES, TECH_STATS } from '../constants';
+import { getNeighbors, getHexId, dist } from '../utils/hexUtils';
 
-const apiKey = typeof process !== 'undefined' && process.env ? process.env.API_KEY : undefined;
-const ai = new GoogleGenAI({ apiKey: apiKey });
-
-const modelName = 'gemini-3-flash-preview';
-
+/**
+ * Heuristic AI Engine - Enhanced
+ * Includes threat assessment, resource prioritization, coordinated defense, and TECH/WONDER strategies.
+ */
 export const getAIMove = async (gameState: GameState, playerColor: PlayerColor): Promise<AIAction> => {
-  if (!apiKey) {
-    console.error("Gemini API Key is missing. AI cannot play.");
-    return { action: 'PASS', reasoning: 'Missing API Key' };
-  }
+  // Add a small delay to simulate "thinking"
+  await new Promise(resolve => setTimeout(resolve, 800));
 
   const player = gameState.players.find(p => p.color === playerColor);
-  if (!player) throw new Error("AI Player not found");
+  if (!player) return { action: 'PASS', reasoning: 'Player not found' };
 
-  // Filter Tiles: Only show tiles that are owned, have units, or are neighbors to those.
-  const relevantTileIds = new Set<string>();
-  Object.values(gameState.tiles).forEach(t => {
-      if (t.controller === playerColor || (t.unitId && gameState.units[t.unitId]?.owner === playerColor)) {
-          relevantTileIds.add(t.id);
-          // Add neighbors
-          const parts = t.id.split(',').map(Number);
-          const neighbors = [
-            [1,0,-1],[1,-1,0],[0,-1,1],[-1,0,1],[-1,1,0],[0,1,-1]
-          ];
-          neighbors.forEach(n => {
-              relevantTileIds.add(`${parts[0]+n[0]},${parts[1]+n[1]},${parts[2]+n[2]}`);
-          });
-      }
-  });
+  const myUnits = Object.values(gameState.units).filter(u => u.owner === playerColor);
+  const myTiles = Object.values(gameState.tiles).filter(t => t.controller === playerColor);
+  const myHQ = myTiles.find(t => t.isHQ);
 
-  Object.values(gameState.units).forEach(u => {
-      if (u.owner !== playerColor) {
-           const tile = Object.values(gameState.tiles).find(t => t.unitId === u.id);
-           if (tile) relevantTileIds.add(tile.id);
-      }
-  });
-
-  const filteredTiles = Object.values(gameState.tiles).filter(t => relevantTileIds.has(t.id)).map(t => {
-      // Create a clean object to avoid any potential circular references from the raw state
-      const tileData: any = { id: t.id, type: t.resource };
-      if (t.controller) tileData.owner = t.controller;
-      if (t.structure) tileData.bldg = t.structure;
-      if (t.hasWall) tileData.wall = true;
-      if (t.unitId && gameState.units[t.unitId]) {
-        const u = gameState.units[t.unitId];
-        tileData.unit = { owner: u.owner, type: u.type, pwr: u.power };
-      }
-      return tileData;
-  });
-
-  const simplifiedState = {
-    turn: gameState.turn,
-    myResources: { ...player.resources }, // Shallow copy to ensure plain object
-    tiles: filteredTiles,
-    enemies: gameState.players
-        .filter(p => p.color !== playerColor && !p.eliminated)
-        .map(p => ({
-            color: p.color,
-            score: Object.values(gameState.tiles).reduce((acc, t) => t.controller === p.color ? acc + 1 : acc, 0)
-        }))
-  };
-
-  const systemInstruction = `
-    Play as ${playerColor} in HexConquest.
-    Rules:
-    - Build Settlements (Wood+Brick+Wheat+Ore) for income.
-    - Build Units to conquer tiles. High Power wins.
-    - Move to adjacent tiles to attack/occupy.
-    
-    Goal: Expand territory.
-    Priorities:
-    1. If you have no units, BUILD_UNIT.
-    2. If you have resources, BUILD_STRUCTURE (Settlement/City) to increase income.
-    3. Attack weaker enemy units nearby.
-    4. Move towards empty resource tiles.
-    
-    Stats: ${JSON.stringify(UNIT_STATS)}
-  `;
-
-  let stateString = "";
-  try {
-      stateString = JSON.stringify(simplifiedState);
-  } catch (e) {
-      console.error("Error serializing game state for AI:", e);
-      return { action: 'PASS', reasoning: 'State serialization error' };
+  // --- STRATEGY 0: WONDER VICTORY CHECK ---
+  if (!gameState.wonderOwner) {
+       const wonderCost = STRUCTURE_STATS[StructureType.WONDER].cost;
+       const canAffordWonder = Object.entries(wonderCost).every(([r, amt]) => player.resources[r as any] >= amt);
+       
+       if (canAffordWonder) {
+           let bestSpot = myHQ;
+           if (!bestSpot || bestSpot.structure) {
+               bestSpot = myTiles.filter(t => !t.structure && !t.isHQ && t.resource !== 'WATER').sort((a,b) => {
+                   return 0; // Random valid
+               })[0];
+           }
+           
+           if (bestSpot) {
+               return {
+                   action: 'BUILD_STRUCTURE',
+                   structureType: StructureType.WONDER,
+                   buildHexId: bestSpot.id,
+                   reasoning: 'ATTEMPTING WONDER VICTORY'
+               };
+           }
+       }
   }
 
-  const prompt = `
-    State: ${stateString}
-    Select best move. Return JSON.
-    CRITICAL: 
-    - If action is 'BUILD_UNIT' or 'BUILD_STRUCTURE', you MUST provide 'buildHexId'.
-    - If action is 'MOVE', you MUST provide 'fromHexId' and 'toHexId'.
-  `;
+  // --- STRATEGY 1: RESEARCH (TECH BOOM) ---
+  const hasMetallurgy = player.techs.includes(TechType.METALLURGY);
+  const hasEconomics = player.techs.includes(TechType.ECONOMICS);
+  const hasSeafaring = player.techs.includes(TechType.SEAFARING);
+  
+  // Prioritize Seafaring if we are near water
+  const adjacentToWater = myTiles.some(t => getNeighbors(t).some(n => gameState.tiles[getHexId(n.q,n.r,n.s)]?.resource === 'WATER'));
+  if (adjacentToWater && !hasSeafaring) {
+      const cost = TECH_STATS[TechType.SEAFARING].cost;
+      if (Object.entries(cost).every(([r, amt]) => player.resources[r as any] >= amt)) {
+          return { action: 'RESEARCH', techType: TechType.SEAFARING, reasoning: 'Unlocking Navy' };
+      }
+  }
 
-  try {
-    const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error("Gemini Request Timed Out")), 25000)
-    );
+  if (!hasEconomics) {
+      const cost = TECH_STATS[TechType.ECONOMICS].cost;
+      if (Object.entries(cost).every(([r, amt]) => player.resources[r as any] >= amt)) {
+          return { action: 'RESEARCH', techType: TechType.ECONOMICS, reasoning: 'Booming Economy' };
+      }
+  }
 
-    const apiCallPromise = ai.models.generateContent({
-      model: modelName,
-      contents: prompt,
-      config: {
-        systemInstruction: systemInstruction,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            action: { type: Type.STRING, enum: ['MOVE', 'BUILD_UNIT', 'BUILD_STRUCTURE', 'PASS'] },
-            fromHexId: { type: Type.STRING },
-            toHexId: { type: Type.STRING },
-            unitType: { type: Type.STRING, enum: ['SCOUT', 'SOLDIER', 'KNIGHT', 'GENERAL'] },
-            structureType: { type: Type.STRING, enum: ['SETTLEMENT', 'CITY', 'WALL', 'ROAD'] },
-            buildHexId: { type: Type.STRING },
-            reasoning: { type: Type.STRING }
-          },
-          required: ['action', 'reasoning']
+  if (myUnits.length > 2 && !hasMetallurgy) {
+       const cost = TECH_STATS[TechType.METALLURGY].cost;
+       if (Object.entries(cost).every(([r, amt]) => player.resources[r as any] >= amt)) {
+          return { action: 'RESEARCH', techType: TechType.METALLURGY, reasoning: 'Upgrading Army Power' };
+      }
+  }
+
+  // --- STRATEGY 2: OFFENSE & EXPANSION (Move/Attack) ---
+  
+  // Prioritize moving strong units that haven't moved yet
+  const movableUnits = myUnits
+    .filter(u => u.movesLeft > 0)
+    .sort((a, b) => b.power - a.power);
+
+  for (const unit of movableUnits) {
+    const unitTile = Object.values(gameState.tiles).find(t => t.unitId === unit.id);
+    if (!unitTile) continue;
+
+    const neighbors = getNeighbors(unitTile);
+    let bestMove: { id: string; score: number } | null = null;
+
+    for (const n of neighbors) {
+      const nId = getHexId(n.q, n.r, n.s);
+      const targetTile = gameState.tiles[nId];
+      if (!targetTile) continue;
+
+      // Terrain check
+      const isShip = unit.type === UnitType.GALLEY;
+      const isWater = targetTile.resource === 'WATER';
+      if (isShip && !isWater) continue;
+      if (!isShip && isWater) continue;
+
+      let score = -1000;
+
+      // Case A: Enemy Unit on Tile (Combat)
+      if (targetTile.unitId) {
+        const targetUnit = gameState.units[targetTile.unitId];
+        if (targetUnit.owner !== playerColor) {
+           const defBonus = (TERRAIN_DEFENSE[targetTile.resource] || 0) + (targetTile.hasWall ? 3 : 0);
+           const estimatedPower = targetUnit.revealed ? targetUnit.power : 4; 
+           const defense = estimatedPower + defBonus;
+           const myPower = unit.power + (hasMetallurgy ? 1 : 0);
+           
+           if (myPower > defense) {
+             score = 100 + (targetUnit.power * 10);
+             if (targetTile.isHQ) score += 500;
+             if (targetTile.structure === StructureType.MONOLITH) score += 400;
+             if (targetTile.structure === StructureType.WONDER) score += 1000;
+           } else if (myPower === defense) {
+             score = myPower < 4 ? 20 : -20; 
+           } else {
+             score = -500;
+           }
+        } else {
+            score = -9999;
         }
+      } 
+      // Case B: Empty/Structure Tile (Movement)
+      else {
+          score = 10;
+          if (targetTile.controller !== playerColor) {
+              score += 20;
+              if (targetTile.resource !== 'WATER' && player.resources[targetTile.resource] < 2) score += 25;
+              if (targetTile.structure) score += 50; 
+              if (targetTile.isHQ) score += 300; 
+              if (targetTile.isRuins) score += 200;
+              if (targetTile.structure === StructureType.MONOLITH) score += 600;
+              if (targetTile.structure === StructureType.WONDER) score += 1000;
+          } else {
+              if (targetTile.structure === StructureType.MONOLITH) score += 10; 
+              if (targetTile.structure === StructureType.WONDER) score += 50; 
+          }
+          const targetNeighbors = getNeighbors(targetTile);
+          let threatPenalty = 0;
+          for (const tn of targetNeighbors) {
+              const tnId = getHexId(tn.q, tn.r, tn.s);
+              const neighborUnit = gameState.units[gameState.tiles[tnId]?.unitId || ''];
+              if (neighborUnit && neighborUnit.owner !== playerColor) {
+                  const myPower = unit.power + (hasMetallurgy ? 1 : 0);
+                  if (neighborUnit.power > myPower) threatPenalty += 60; 
+                  else if (neighborUnit.power === myPower) threatPenalty += 10;
+              }
+          }
+          score -= threatPenalty;
+          
+          if (myHQ) {
+              const distToHQ = dist(targetTile, myHQ);
+              if (distToHQ < 3) score += 5; // Patrol home
+          }
+          
+          const distToCenter = Math.max(Math.abs(targetTile.q), Math.abs(targetTile.r), Math.abs(targetTile.s));
+          score -= distToCenter * 5;
       }
-    });
 
-    const response: any = await Promise.race([apiCallPromise, timeoutPromise]);
+      if (score > (bestMove?.score || -9999)) {
+        bestMove = { id: nId, score };
+      }
+    }
 
-    let text = response.text;
-    if (!text) return { action: 'PASS', reasoning: 'AI failed to generate response' };
-
-    text = text.trim();
-    if (text.startsWith('```json')) text = text.replace(/^```json/, '').replace(/```$/, '');
-    else if (text.startsWith('```')) text = text.replace(/^```/, '').replace(/```$/, '');
-
-    return JSON.parse(text) as AIAction;
-
-  } catch (error: any) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error("Gemini AI Error:", msg);
-    return { action: 'PASS', reasoning: 'AI Error encountered' };
+    if (bestMove && bestMove.score > -50) {
+      return {
+        action: 'MOVE',
+        fromHexId: unitTile.id,
+        toHexId: bestMove.id,
+        reasoning: `Score: ${bestMove.score}`
+      };
+    }
   }
+
+  // --- STRATEGY 3: RECRUITMENT ---
+  
+  if (myUnits.length < 10) {
+     const recruitOrder = [UnitType.GENERAL, UnitType.KNIGHT, UnitType.SOLDIER, UnitType.SCOUT];
+     
+     // Try to build Ship if possible
+     if (hasSeafaring) {
+         const cost = UNIT_STATS[UnitType.GALLEY].cost;
+         if (Object.entries(cost).every(([r, amt]) => player.resources[r as any] >= amt)) {
+             // Find water tile adjacent to my coastal structures
+             let waterTile = null;
+             for (const t of myTiles) {
+                 if (t.structure && t.resource !== 'WATER') {
+                     const ns = getNeighbors(t);
+                     const w = ns.find(n => {
+                         const tid = getHexId(n.q,n.r,n.s);
+                         const tile = gameState.tiles[tid];
+                         return tile && tile.resource === 'WATER' && !tile.unitId;
+                     });
+                     if (w) {
+                         waterTile = gameState.tiles[getHexId(w.q,w.r,w.s)];
+                         break;
+                     }
+                 }
+             }
+             if (waterTile) {
+                 return { action: 'BUILD_UNIT', unitType: UnitType.GALLEY, buildHexId: waterTile.id, reasoning: 'Building Navy' };
+             }
+         }
+     }
+
+     for (const type of recruitOrder) {
+         const cost = UNIT_STATS[type].cost;
+         const canAfford = Object.entries(cost).every(([r, amt]) => player.resources[r as any] >= amt);
+         if (canAfford) {
+             const spawnCandidates = myTiles.filter(t => !t.unitId && t.structure !== StructureType.MONOLITH && t.structure !== StructureType.WONDER && t.resource !== 'WATER');
+             spawnCandidates.sort((a, b) => dist(a, {q:0,r:0,s:0}) - dist(b, {q:0,r:0,s:0})); // Spawn closer to center
+             
+             if (spawnCandidates.length > 0) {
+                 return {
+                     action: 'BUILD_UNIT',
+                     unitType: type,
+                     buildHexId: spawnCandidates[0].id,
+                     reasoning: `Recruiting ${type}`
+                 };
+             }
+         }
+     }
+  }
+
+  // --- STRATEGY 4: ECONOMY & INFRASTRUCTURE ---
+  
+  // Roads
+  const roadCost = STRUCTURE_STATS[StructureType.ROAD].cost;
+  if (Object.entries(roadCost).every(([r, amt]) => player.resources[r as any] >= amt)) {
+      // Find tiles I own without road that connect 2 tiles with things?
+      // Simple: Build road on any owned tile without road that has a unit or structure
+      const roadCandidates = myTiles.filter(t => !t.hasRoad && t.resource !== 'WATER');
+      if (roadCandidates.length > 0) {
+          return {
+              action: 'BUILD_STRUCTURE',
+              structureType: StructureType.ROAD,
+              buildHexId: roadCandidates[0].id,
+              reasoning: 'Infrastructure'
+          };
+      }
+  }
+
+  if (player.resources.WHEAT >= 2 && player.resources.ORE >= 3) {
+      const settlement = myTiles.find(t => t.structure === StructureType.SETTLEMENT);
+      if (settlement) {
+          return {
+              action: 'BUILD_STRUCTURE',
+              structureType: StructureType.CITY,
+              buildHexId: settlement.id,
+              reasoning: 'Upgrading to City'
+          };
+      }
+  }
+
+  if (player.resources.WOOD >= 1 && player.resources.BRICK >= 1 && player.resources.WHEAT >= 1) {
+      const spot = myTiles.find(t => !t.structure && !t.isHQ && t.structure !== StructureType.MONOLITH && t.structure !== StructureType.WONDER && t.resource !== 'WATER');
+      if (spot) {
+           return {
+              action: 'BUILD_STRUCTURE',
+              structureType: StructureType.SETTLEMENT,
+              buildHexId: spot.id,
+              reasoning: 'Expanding Economy'
+          };
+      }
+  }
+
+  return { action: 'PASS', reasoning: 'Done' };
 };

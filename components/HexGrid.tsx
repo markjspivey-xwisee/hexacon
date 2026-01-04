@@ -1,8 +1,8 @@
 import React, { useMemo } from 'react';
-import { GameState, HexCoordinate, PlayerColor, Tile, StructureType } from '../types';
-import { hexToPixel } from '../utils/hexUtils';
-import { HEX_SIZE, RESOURCE_COLORS, PLAYER_COLORS, TERRAIN_DEFENSE } from '../constants';
-import { Trees, Mountain, Wheat, BrickWall, Castle, User, EyeOff, Shield, Home, Building2, Milestone } from 'lucide-react';
+import { GameState, HexCoordinate, PlayerColor, Tile, StructureType, FloatingText } from '../types';
+import { hexToPixel, getNeighbors, getHexId } from '../utils/hexUtils';
+import { HEX_SIZE, RESOURCE_COLORS, PLAYER_COLORS, TERRAIN_DEFENSE, MAX_MAP_RADIUS } from '../constants';
+import { Trees, Mountain, Wheat, BrickWall, Castle, User, EyeOff, Shield, Home, Building2, Milestone, Gem, TowerControl, Sparkles, Star } from 'lucide-react';
 
 interface HexGridProps {
   gameState: GameState;
@@ -35,6 +35,20 @@ const HexTile: React.FC<{
   let stroke = '#1e293b'; 
   let strokeWidth = 2;
   let cursorClass = "cursor-default";
+
+  // Monolith Special Styling
+  if (tile.structure === StructureType.MONOLITH) {
+      fillColor = '#0f172a'; // Dark slate
+      stroke = '#8b5cf6'; // Violet
+      strokeWidth = 3;
+  }
+  
+  // Wonder Special Styling
+  if (tile.structure === StructureType.WONDER) {
+      fillColor = '#422006'; // Dark Bronze
+      stroke = '#eab308'; // Gold
+      strokeWidth = 4;
+  }
 
   if (!isVisible) {
       fillColor = '#1e293b'; // Dark color for fog
@@ -75,6 +89,16 @@ const HexTile: React.FC<{
   const TerrainIcon = () => {
     if (!isVisible) return <EyeOff size={16} className="text-slate-700 opacity-50" />;
     
+    // Monolith Icon
+    if (tile.structure === StructureType.MONOLITH) {
+        return <Gem size={20} className="text-violet-400 drop-shadow-[0_0_8px_rgba(167,139,250,0.8)] animate-pulse" />;
+    }
+    
+    // Wonder Icon
+    if (tile.structure === StructureType.WONDER) {
+        return <Star size={24} className="text-yellow-400 drop-shadow-[0_0_15px_rgba(234,179,8,0.8)] animate-spin-slow" fill="currentColor" />;
+    }
+
     const iconProps = { size: 16, className: "opacity-40 text-black" };
     switch (tile.resource) {
       case 'WOOD': return <Trees {...iconProps} />;
@@ -83,6 +107,37 @@ const HexTile: React.FC<{
       case 'BRICK': return <BrickWall {...iconProps} />;
       default: return null;
     }
+  };
+
+  // Render Road Network
+  const RoadNetwork = () => {
+      if (!isVisible || !tile.hasRoad) return null;
+
+      const neighbors = getNeighbors(tile);
+      const connections = neighbors.map(n => {
+          const nId = getHexId(n.q, n.r, n.s);
+          const nTile = gameState.tiles[nId];
+          
+          // Only connect if neighbor has road and is visible to the player
+          const isNeighborVisible = gameState.visibleHexes ? gameState.visibleHexes.includes(nId) : true;
+          
+          if (nTile && nTile.hasRoad && isNeighborVisible) {
+              const { x: nx, y: ny } = hexToPixel(n);
+              // Calculate relative position of neighbor center
+              const dx = nx - x;
+              const dy = ny - y;
+              // Draw line to the midpoint (edge)
+              return <line key={nId} x1={0} y1={0} x2={dx/2} y2={dy/2} stroke="#cbd5e1" strokeWidth={6} strokeLinecap="round" />;
+          }
+          return null;
+      });
+
+      return (
+          <g className="pointer-events-none">
+              {connections}
+              <circle cx={0} cy={0} r={5} fill="#cbd5e1" />
+          </g>
+      );
   };
 
   return (
@@ -95,10 +150,8 @@ const HexTile: React.FC<{
            <polygon points={points} fill="none" stroke="#334155" strokeWidth="6" className="opacity-80" />
       )}
 
-      {/* Road Indicator (Dashed border inside) */}
-      {isVisible && tile.hasRoad && (
-           <polygon points={points} fill="none" stroke="#f1f5f9" strokeWidth="2" strokeDasharray="4 2" className="opacity-60" transform="scale(0.85)" />
-      )}
+      {/* Road Network */}
+      <RoadNetwork />
       
       {/* Fog Overlay Pattern */}
       {!isVisible && (
@@ -119,6 +172,15 @@ const HexTile: React.FC<{
             <TerrainIcon />
          </div>
       </foreignObject>
+
+      {/* Ruins Overlay */}
+      {isVisible && tile.isRuins && !tile.structure && !tile.unitId && (
+          <foreignObject x={-10} y={-10} width={20} height={20} className="pointer-events-none">
+             <div className="flex justify-center items-center h-full animate-bounce">
+                <Sparkles size={16} className="text-yellow-400 drop-shadow-md" />
+             </div>
+          </foreignObject>
+      )}
     
       {/* Defense Shield Indicator (Terrain + Wall) */}
       {isVisible && (defenseBonus > 0 || tile.hasWall) && (
@@ -131,7 +193,7 @@ const HexTile: React.FC<{
       )}
 
       {/* Buildings */}
-      {isVisible && tile.structure && (
+      {isVisible && tile.structure && tile.structure !== StructureType.MONOLITH && tile.structure !== StructureType.WONDER && (
          <foreignObject x={-20} y={-28} width={40} height={24} className="pointer-events-none">
             <div className="flex justify-center items-center gap-1">
                {tile.isHQ && <Castle size={16} className="text-white drop-shadow-md" fill={PLAYER_COLORS[tile.controller!]} />}
@@ -143,6 +205,7 @@ const HexTile: React.FC<{
 
       {/* Unit Rendering */}
       {unit && isVisible && (
+        <>
         <foreignObject x={-16} y={-12} width={32} height={32} className="pointer-events-none">
           <div 
             className={`w-8 h-8 rounded-full flex items-center justify-center border-2 bg-white shadow-lg ${unit.movesLeft === 0 ? 'grayscale opacity-70' : ''}`}
@@ -159,13 +222,16 @@ const HexTile: React.FC<{
                 </div>
             )}
           </div>
-          {/* Movement Indicator for Own Units */}
-          {isMyUnit && unit.movesLeft > 0 && (
-             <div className="absolute -bottom-1 -right-1 bg-green-500 text-[8px] text-white rounded-full w-3 h-3 flex items-center justify-center border border-white">
-                {unit.movesLeft}
-             </div>
-          )}
         </foreignObject>
+        
+        {/* Movement Indicator (SVG to ensure no clipping and clear visibility) */}
+        {isMyUnit && unit.movesLeft > 0 && (
+             <g transform="translate(12, 16)">
+                <circle cx="0" cy="0" r="7" fill="#22c55e" stroke="white" strokeWidth="1.5" />
+                <text x="0" y="3" textAnchor="middle" fill="white" fontSize="9" fontWeight="bold" pointerEvents="none">{unit.movesLeft}</text>
+             </g>
+          )}
+        </>
       )}
     </g>
   );
@@ -210,7 +276,17 @@ export const HexGrid: React.FC<HexGridProps> = ({ gameState, onTileClick, validM
         width,
         height
     };
-  }, [tiles.length]); // Recalculate when tile count changes
+  }, [tiles.length]); 
+
+  // Arena Background Hexagon
+  const arenaPath = useMemo(() => {
+      const angles = [0, 60, 120, 180, 240, 300];
+      const rad = MAX_MAP_RADIUS * 1.5 * HEX_SIZE * 1.732; // Approx rough size for the background arena visual
+      return angles.map(angle => {
+          const r = Math.PI / 180 * angle;
+          return `${rad * Math.cos(r)},${rad * Math.sin(r)}`;
+      }).join(' ');
+  }, []);
 
   return (
     <div className="w-full h-full overflow-hidden flex justify-center items-center bg-slate-900 rounded-xl shadow-2xl border border-slate-800 relative">
@@ -225,6 +301,10 @@ export const HexGrid: React.FC<HexGridProps> = ({ gameState, onTileClick, validM
                 <path d="M-1,1 l2,-2 M0,4 l4,-4 M3,5 l2,-2" stroke="#0f172a" strokeWidth="1" />
             </pattern>
         </defs>
+        
+        {/* Arena Bounds Visual */}
+        <polygon points={arenaPath} fill="none" stroke="#1e293b" strokeWidth="20" strokeDasharray="20 10" className="opacity-50" />
+        
         <g>
           {tiles.map((tile: Tile) => {
              // Default to visible if visibleHexes is undefined (e.g. spectator or old state)
@@ -245,6 +325,39 @@ export const HexGrid: React.FC<HexGridProps> = ({ gameState, onTileClick, validM
             );
           })}
         </g>
+        
+        {/* Floating Text Overlay */}
+        {gameState.effects.map(effect => (
+             <text 
+                key={effect.id} 
+                x={effect.x} 
+                y={effect.y} 
+                fill={effect.color} 
+                textAnchor="middle" 
+                fontSize="16" 
+                fontWeight="bold" 
+                className="animate-float-up pointer-events-none drop-shadow-md"
+                style={{ animation: 'floatUp 2s ease-out forwards' }}
+             >
+                 {effect.text}
+             </text>
+        ))}
+        <style>{`
+            @keyframes floatUp {
+                0% { opacity: 1; transform: translateY(0); }
+                100% { opacity: 0; transform: translateY(-40px); }
+            }
+            .animate-float-up {
+                animation: floatUp 2s ease-out forwards;
+            }
+            .animate-spin-slow {
+                animation: spin 8s linear infinite;
+            }
+            @keyframes spin {
+                from { transform: rotate(0deg); }
+                to { transform: rotate(360deg); }
+            }
+        `}</style>
       </svg>
     </div>
   );

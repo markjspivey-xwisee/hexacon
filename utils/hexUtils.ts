@@ -1,4 +1,4 @@
-import { HexCoordinate, Tile, GameState, PlayerColor, ResourceType } from '../types';
+import { HexCoordinate, Tile, GameState, PlayerColor, ResourceType, StructureType, MapType } from '../types';
 import { HEX_SIZE, TERRAIN_TYPE } from '../constants';
 
 export const getHexId = (q: number, r: number, s: number) => `${q},${r},${s}`;
@@ -17,13 +17,62 @@ export const getNeighbors = (hex: HexCoordinate): HexCoordinate[] => {
   return directions.map(d => ({ q: hex.q + d.q, r: hex.r + d.r, s: hex.s + d.s }));
 };
 
-export const generateNewTile = (q: number, r: number, s: number): Tile => {
+// Improved Terrain Generation
+export const generateNewTile = (q: number, r: number, s: number, mapType: MapType = MapType.PANGAEA): Tile => {
     const id = getHexId(q, r, s);
-    const rand = Math.random();
+    
+    // The Monolith: Absolute Center
+    if (q === 0 && r === 0 && s === 0) {
+        return {
+            id, q, r, s,
+            resource: 'ORE',
+            terrain: 'Monolith',
+            controller: null,
+            unitId: null,
+            isHQ: false,
+            isRuins: false,
+            structure: StructureType.MONOLITH,
+            hasWall: false,
+            hasRoad: false
+        };
+    }
+
+    // Pseudo-random noise
+    let noise = Math.sin(q * 0.8) + Math.cos(r * 0.7) + Math.sin(s * 0.3);
+    const dist = Math.max(Math.abs(q), Math.abs(r), Math.abs(s));
+
     let res: ResourceType = 'WOOD';
-    if (rand > 0.75) res = 'ORE';
-    else if (rand > 0.5) res = 'WHEAT';
-    else if (rand > 0.25) res = 'BRICK';
+    
+    if (mapType === MapType.ARCHIPELAGO) {
+        // High water presence
+        if (Math.sin(q * 0.5) * Math.cos(r * 0.5) > 0.1) {
+             res = 'WATER';
+        } else {
+             if (noise > 1.2) res = 'ORE';
+             else if (noise > 0.4) res = 'BRICK';
+             else if (noise > -0.5) res = 'WOOD';
+             else res = 'WHEAT';
+        }
+    } else if (mapType === MapType.VOLCANIC) {
+        if (noise > 0.8) res = 'ORE';
+        else if (noise > 0.0) res = 'BRICK';
+        else if (noise > -0.5) res = 'WOOD';
+        else res = 'WHEAT';
+        // Some water lakes
+        if (noise < -1.5) res = 'WATER';
+    } else {
+        // Pangaea
+        if (noise > 1.2) res = 'ORE';
+        else if (noise > 0.4) res = 'BRICK';
+        else if (noise > -0.5) res = 'WOOD';
+        else res = 'WHEAT';
+        
+        // Ocean edges
+        if (dist > 6 && Math.random() > 0.7) res = 'WATER';
+    }
+
+    // Ruins: only on land
+    const isRuins = res !== 'WATER' && dist > 2 && Math.random() < 0.08;
 
     return {
         id, q, r, s,
@@ -32,20 +81,21 @@ export const generateNewTile = (q: number, r: number, s: number): Tile => {
         controller: null,
         unitId: null,
         isHQ: false,
+        isRuins,
         structure: null,
         hasWall: false,
         hasRoad: false
     };
 };
 
-export const generateGrid = (radius: number): Record<string, Tile> => {
+export const generateGrid = (radius: number, mapType: MapType = MapType.PANGAEA): Record<string, Tile> => {
   const tiles: Record<string, Tile> = {};
   for (let q = -radius; q <= radius; q++) {
     const r1 = Math.max(-radius, -q - radius);
     const r2 = Math.min(radius, -q + radius);
     for (let r = r1; r <= r2; r++) {
       const s = -q - r;
-      tiles[getHexId(q, r, s)] = generateNewTile(q, r, s);
+      tiles[getHexId(q, r, s)] = generateNewTile(q, r, s, mapType);
     }
   }
   return tiles;
@@ -59,17 +109,9 @@ export const dist = (a: HexCoordinate, b: HexCoordinate): number => {
 export const calculateVisibleHexes = (gameState: GameState, playerColor: PlayerColor): string[] => {
   const visible = new Set<string>();
   
-  // 1. All tiles owned by player are visible
-  // 2. All tiles with player's units are visible
-  // 3. All neighbors of the above are visible
-  
   Object.values(gameState.tiles).forEach(tile => {
     let isSource = false;
-    
-    // Territory ownership
     if (tile.controller === playerColor) isSource = true;
-    
-    // Unit presence
     if (tile.unitId && gameState.units[tile.unitId]?.owner === playerColor) isSource = true;
 
     if (isSource) {
@@ -78,6 +120,7 @@ export const calculateVisibleHexes = (gameState: GameState, playerColor: PlayerC
       neighbors.forEach(n => visible.add(getHexId(n.q, n.r, n.s)));
     }
   });
-
+  
+  visible.add("0,0,0");
   return Array.from(visible);
 };

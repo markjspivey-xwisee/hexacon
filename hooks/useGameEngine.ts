@@ -1,10 +1,11 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { GameState, Player, PlayerColor, Tile, Unit, UnitType, StructureType, ResourceType, MatchData } from '../types';
-import { generateGrid, getHexId, getNeighbors, calculateVisibleHexes, generateNewTile } from '../utils/hexUtils';
-import { BOARD_RADIUS, INITIAL_RESOURCES, UNIT_STATS, STRUCTURE_STATS, TERRAIN_TYPE, RESOURCES, TERRAIN_DEFENSE } from '../constants';
+import { GameState, Player, PlayerColor, Tile, Unit, UnitType, StructureType, ResourceType, FloatingText, MatchData, TechType, MapType, CombatResult } from '../types';
+import { generateGrid, getHexId, getNeighbors, calculateVisibleHexes, generateNewTile, hexToPixel } from '../utils/hexUtils';
+import { BOARD_RADIUS, MAX_MAP_RADIUS, INITIAL_RESOURCES, UNIT_STATS, STRUCTURE_STATS, TERRAIN_TYPE, RESOURCES, TERRAIN_DEFENSE, TECH_STATS, WONDER_VICTORY_TURNS } from '../constants';
 import { getAIMove } from '../services/geminiService';
 import { createOnlineGame, joinOnlineGame, subscribeToMatch, updateMatchState, isFirebaseInitialized, initFirebase } from '../services/firebaseService';
+import { playSound } from '../utils/soundUtils';
 
 const LOCAL_STORAGE_PLAYER_ID_KEY = 'hex_player_id';
 const LOCAL_STORAGE_FB_CONFIG_KEY = 'hex_firebase_config';
@@ -29,20 +30,19 @@ const getLocalPlayerId = () => {
   return id;
 };
 
-// Helper to expand map: ensures all tiles with units/ownership have neighbors existing in the grid
-const ensureFrontier = (tiles: Record<string, Tile>): Record<string, Tile> => {
+const ensureFrontier = (tiles: Record<string, Tile>, mapType: MapType = MapType.PANGAEA): Record<string, Tile> => {
     const newTiles = { ...tiles };
     let changed = false;
     
-    // Convert to array to avoid issues while mutating
     Object.values(tiles).forEach(tile => {
-        // If tile has a unit or is controlled, ensuring neighbors exist
         if (tile.unitId || tile.controller) {
             const neighbors = getNeighbors(tile);
             neighbors.forEach(n => {
                 const nId = getHexId(n.q, n.r, n.s);
-                if (!newTiles[nId]) {
-                    newTiles[nId] = generateNewTile(n.q, n.r, n.s);
+                const distFromCenter = Math.max(Math.abs(n.q), Math.abs(n.r), Math.abs(n.s));
+                
+                if (!newTiles[nId] && distFromCenter <= MAX_MAP_RADIUS) {
+                    newTiles[nId] = generateNewTile(n.q, n.r, n.s, mapType);
                     changed = true;
                 }
             });
@@ -52,8 +52,8 @@ const ensureFrontier = (tiles: Record<string, Tile>): Record<string, Tile> => {
     return changed ? newTiles : tiles;
 };
 
-const createInitialState = (numPlayers: number): GameState => {
-  let tiles = generateGrid(BOARD_RADIUS);
+const createInitialState = (numPlayers: number, mapType: MapType = MapType.PANGAEA): GameState => {
+  let tiles = generateGrid(BOARD_RADIUS, mapType);
   
   const colors = [PlayerColor.RED, PlayerColor.BLUE, PlayerColor.GREEN, PlayerColor.YELLOW].slice(0, numPlayers);
   const players: Player[] = colors.map((c, i) => ({
@@ -61,18 +61,33 @@ const createInitialState = (numPlayers: number): GameState => {
     isAI: i !== 0,
     resources: { ...INITIAL_RESOURCES },
     activeUnits: 0,
-    eliminated: false
+    eliminated: false,
+    techs: []
   }));
 
   const startIds = [
-    getHexId(0, -3, 3), 
-    getHexId(0, 3, -3), 
-    getHexId(-3, 0, 3), 
-    getHexId(3, 0, -3)
+    getHexId(0, -3, 3),   // N
+    getHexId(0, 3, -3),   // S
+    getHexId(-3, 0, 3),   // NW
+    getHexId(3, 0, -3)    // SE
   ];
+  
+  if (numPlayers === 3) {
+      startIds[0] = getHexId(0, -3, 3);
+      startIds[1] = getHexId(3, -1, -2);
+      startIds[2] = getHexId(-3, 4, -1);
+  }
 
   players.forEach((p, idx) => {
-    const hqId = startIds[idx] || Object.keys(tiles)[idx]; 
+    let hqId = startIds[idx] && tiles[startIds[idx]] ? startIds[idx] : Object.keys(tiles)[idx];
+    // Ensure HQ is on Land
+    if (tiles[hqId].resource === 'WATER') {
+        const neighbors = getNeighbors(tiles[hqId]);
+        const landNeighbor = neighbors.find(n => tiles[getHexId(n.q, n.r, n.s)]?.resource !== 'WATER');
+        if (landNeighbor) hqId = getHexId(landNeighbor.q, landNeighbor.r, landNeighbor.s);
+        else tiles[hqId].resource = 'WHEAT'; // Force land
+    }
+
     if (tiles[hqId]) {
       tiles[hqId].controller = p.color;
       tiles[hqId].isHQ = true;
@@ -80,8 +95,7 @@ const createInitialState = (numPlayers: number): GameState => {
     }
   });
   
-  // Expand frontier immediately for starting positions
-  tiles = ensureFrontier(tiles);
+  tiles = ensureFrontier(tiles, mapType);
 
   const initialState: GameState = {
     turn: 1,
@@ -89,11 +103,12 @@ const createInitialState = (numPlayers: number): GameState => {
     players,
     tiles,
     units: {},
-    gameLog: ['Game Started. Red to move.'],
+    gameLog: ['Game Started. Research Seafaring to explore the ocean!'],
     winner: null,
     selectedHexId: null,
     isProcessing: false,
-    visibleHexes: []
+    visibleHexes: [],
+    effects: []
   };
 
   initialState.visibleHexes = calculateVisibleHexes(initialState, PlayerColor.RED);
@@ -105,6 +120,7 @@ export const useGameEngine = () => {
   const [gameState, setGameState] = useState<GameState>(() => createInitialState(2));
   const [setupMode, setSetupMode] = useState(true);
   const [isOnline, setIsOnline] = useState(false);
+  const [isSpectatorMode, setIsSpectatorMode] = useState(false);
   const [localPlayerColor, setLocalPlayerColor] = useState<PlayerColor | null>(null);
   const [matchId, setMatchId] = useState<string | null>(null);
   const [firebaseConfigured, setFirebaseConfigured] = useState(false);
@@ -113,8 +129,49 @@ export const useGameEngine = () => {
   const [isCreatingGame, setCreatingGame] = useState(false);
   const [playerId, setPlayerId] = useState(getLocalPlayerId());
 
+  // Ref to always get current state in async AI functions
   const gameStateRef = useRef(gameState);
   useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
+
+  // Effect cleanup
+  useEffect(() => {
+    if (gameState.effects.length > 0) {
+        const timer = setTimeout(() => {
+            setGameState(prev => ({
+                ...prev,
+                effects: prev.effects.filter(e => Date.now() - e.createdAt < 2000)
+            }));
+        }, 2000);
+        return () => clearTimeout(timer);
+    }
+  }, [gameState.effects.length]);
+  
+  // Combat cleanup
+  useEffect(() => {
+      if (gameState.combatResult) {
+          const timer = setTimeout(() => {
+              setGameState(prev => ({ ...prev, combatResult: null }));
+          }, 3500); 
+          return () => clearTimeout(timer);
+      }
+  }, [gameState.combatResult]);
+
+  const addEffect = useCallback((text: string, tileId: string, color: string) => {
+      setGameState(prev => {
+          const tile = prev.tiles[tileId];
+          if (!tile) return prev;
+          const { x, y } = hexToPixel(tile);
+          const newEffect: FloatingText = {
+              id: uuidv4(),
+              x: x + (Math.random() * 20 - 10),
+              y: y - 20,
+              text,
+              color,
+              createdAt: Date.now()
+          };
+          return { ...prev, effects: [...prev.effects, newEffect] };
+      });
+  }, []);
 
   const syncPlayerId = (newId: string) => {
     if (newId && newId.length > 10) {
@@ -168,17 +225,18 @@ export const useGameEngine = () => {
       setFirebaseConfigured(true);
   };
 
-  const startOnlineGame = async (numPlayers: number) => {
+  const startOnlineGame = async (numPlayers: number, mapType: MapType) => {
     setGameError(null);
     if (!firebaseConfigured) { setGameError("Firebase not configured."); return; }
     setCreatingGame(true);
     try {
-        const initial = createInitialState(numPlayers);
+        const initial = createInitialState(numPlayers, mapType);
         initial.players.forEach(p => p.isAI = false); 
         const id = await createOnlineGame(initial, playerId);
         setMatchId(id);
         setLocalPlayerColor(PlayerColor.RED);
         setIsOnline(true);
+        setIsSpectatorMode(false);
         setGameState({ ...initial, matchId: id });
         setSetupMode(false);
         localStorage.setItem(LOCAL_STORAGE_MATCH_ID_KEY, id);
@@ -196,6 +254,7 @@ export const useGameEngine = () => {
             setMatchId(id);
             setLocalPlayerColor(result.color);
             setIsOnline(true);
+            setIsSpectatorMode(false);
             setSetupMode(false);
             localStorage.setItem(LOCAL_STORAGE_MATCH_ID_KEY, id);
             setSavedMatchId(id);
@@ -215,12 +274,16 @@ export const useGameEngine = () => {
       }
   };
 
-  // Camera/Visibility Helper
   const getViewerColor = (state: GameState) => {
     if (isOnline) return localPlayerColor || PlayerColor.RED;
     const activePlayer = state.players[state.currentPlayerIndex];
-    if (activePlayer.isAI) return PlayerColor.RED; // Keep camera on human during AI turn
+    if (activePlayer.isAI) return PlayerColor.RED; 
     return activePlayer.color;
+  };
+
+  const getVisibleHexes = (state: GameState, isSpectating: boolean) => {
+      if (isSpectating) return Object.keys(state.tiles);
+      return calculateVisibleHexes(state, getViewerColor(state));
   };
 
   useEffect(() => {
@@ -231,7 +294,7 @@ export const useGameEngine = () => {
                 ...data.gameState,
                 selectedHexId: prev.selectedHexId,
             };
-            newState.visibleHexes = calculateVisibleHexes(newState, getViewerColor(newState));
+            newState.visibleHexes = getVisibleHexes(newState, false);
             return newState;
         });
       });
@@ -239,22 +302,54 @@ export const useGameEngine = () => {
     }
   }, [isOnline, matchId, localPlayerColor]);
 
-  const startGame = (playerCount: number) => {
-    setGameState(createInitialState(playerCount));
+  const startGame = (playerCount: number, mapType: MapType) => {
+    setGameState(createInitialState(playerCount, mapType));
     setIsOnline(false);
+    setIsSpectatorMode(false);
     setSetupMode(false);
+    playSound('TURN_START');
+  };
+
+  const startSpectatorGame = (playerCount: number, mapType: MapType) => {
+    const initial = createInitialState(playerCount, mapType);
+    initial.players = initial.players.map(p => ({ ...p, isAI: true }));
+    initial.visibleHexes = Object.keys(initial.tiles);
+    
+    setGameState(initial);
+    setIsOnline(false);
+    setIsSpectatorMode(true);
+    setSetupMode(false);
+    playSound('TURN_START');
   };
 
   const getCurrentPlayer = () => gameState.players[gameState.currentPlayerIndex];
 
   const canAct = () => {
     if (isOnline) return getCurrentPlayer().color === localPlayerColor;
+    if (isSpectatorMode) return false;
     return true;
   };
 
   const endTurn = useCallback(() => {
     setGameState(prev => {
       if (isOnline && prev.players[prev.currentPlayerIndex].color !== localPlayerColor) return prev;
+      
+      let nextState = { ...prev };
+
+      // CHECK FOR WONDER VICTORY
+      if (prev.wonderOwner && prev.wonderBuiltAt) {
+          const wonderTile = (Object.values(prev.tiles) as Tile[]).find(t => t.structure === StructureType.WONDER);
+          if (wonderTile && wonderTile.controller === prev.wonderOwner) {
+              const turnsHeld = prev.turn - prev.wonderBuiltAt;
+              if (turnsHeld >= WONDER_VICTORY_TURNS) {
+                  return { ...prev, winner: prev.wonderOwner, gameLog: [`${prev.wonderOwner} has achieved a Wonder Victory!`, ...prev.gameLog] };
+              }
+          } else {
+              nextState.wonderBuiltAt = undefined;
+              nextState.wonderOwner = undefined;
+              nextState.gameLog = ["The Wonder has fallen! Victory timer reset.", ...prev.gameLog];
+          }
+      }
 
       let nextIndex = (prev.currentPlayerIndex + 1) % prev.players.length;
       let nextPlayer = prev.players[nextIndex];
@@ -269,12 +364,26 @@ export const useGameEngine = () => {
       const updatedPlayers = prev.players.map(p => {
         if (p.color === nextPlayer.color) {
           const newResources = { ...p.resources };
+          const ecoBonus = p.techs.includes(TechType.ECONOMICS) ? 1 : 0;
+          
           (Object.values(prev.tiles) as Tile[]).forEach(t => {
             if (t.controller === p.color) {
-              let amount = 1;
+              let amount = 1 + ecoBonus;
               if (t.structure === StructureType.SETTLEMENT) amount += 1;
               if (t.structure === StructureType.CITY) amount += 2;
-              newResources[t.resource] += amount;
+              
+              if (t.structure === StructureType.MONOLITH) {
+                  newResources.WOOD += 2;
+                  newResources.BRICK += 2;
+                  newResources.WHEAT += 2;
+                  newResources.ORE += 2;
+              }
+              // Water tiles yield WHEAT if controlled (fishing)
+              if (t.resource === 'WATER') {
+                  newResources.WHEAT += 1; // Basic fishing
+              } else {
+                  newResources[t.resource] += amount;
+              }
             }
           });
           return { ...p, resources: newResources };
@@ -287,39 +396,196 @@ export const useGameEngine = () => {
         const unit = updatedUnits[unitId];
         if (unit.owner === nextPlayer.color) {
            let moves = unit.maxMoves;
+           const ownerPlayer = prev.players.find(p => p.color === unit.owner);
+           
+           if (ownerPlayer?.techs.includes(TechType.LOGISTICS) && (unit.type === UnitType.SOLDIER || unit.type === UnitType.KNIGHT)) {
+               moves += 1;
+           }
+
            const tile = (Object.values(prev.tiles) as Tile[]).find(t => t.unitId === unitId);
            if (tile && tile.hasRoad) moves += 1;
            updatedUnits[unitId] = { ...unit, movesLeft: moves };
         }
       });
       
-      const nextState = {
-        ...prev,
+      nextState = {
+        ...nextState,
         currentPlayerIndex: nextIndex,
         turn: nextTurn,
         players: updatedPlayers,
         units: updatedUnits,
         selectedHexId: null,
-        gameLog: [`Turn ${nextTurn}: ${nextPlayer.color}'s turn.`, ...prev.gameLog].slice(0, 50),
-        isProcessing: false
+        gameLog: [`Turn ${nextTurn}: ${nextPlayer.color}'s turn.`, ...nextState.gameLog].slice(0, 50),
+        isProcessing: false // Ensure AI flag is reset for new player
       };
       
-      nextState.visibleHexes = calculateVisibleHexes(nextState, getViewerColor(nextState));
+      nextState.visibleHexes = getVisibleHexes(nextState, isSpectatorMode);
       
+      if ((!isOnline && !nextPlayer.isAI) || (isOnline && nextPlayer.color === localPlayerColor)) {
+          playSound('TURN_START');
+      }
+
       if (isOnline && matchId) updateMatchState(matchId, nextState);
       return nextState;
     });
-  }, [isOnline, matchId, localPlayerColor]); 
+  }, [isOnline, matchId, localPlayerColor, isSpectatorMode]); 
+
+  // --- AI LOGIC LOOP (Fixed) ---
+  useEffect(() => {
+    // Only run if offline game or I am the host/local and it's AI turn (for simplicity in local vs AI)
+    // Actually, for local play: logic runs on client.
+    if (isOnline) return; // Online AI handling is complex, assume handled by host or disabled for now in this scope
+    if (setupMode) return;
+    if (gameState.winner) return;
+    
+    const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+    if (currentPlayer.isAI && !currentPlayer.eliminated && !gameState.isProcessing) {
+        
+        // Flag processing to prevent double-execution
+        setGameState(prev => ({ ...prev, isProcessing: true }));
+
+        const processAITurn = async () => {
+            // Wait a beat for UI update
+            await new Promise(r => setTimeout(r, 600));
+
+            const aiPlayer = gameStateRef.current.players[gameStateRef.current.currentPlayerIndex];
+            
+            // AI Action Loop
+            for (let i = 0; i < 3; i++) {
+                if (gameStateRef.current.winner) break;
+
+                const action = await getAIMove(gameStateRef.current, aiPlayer.color);
+                
+                if (action.action === 'PASS') break;
+
+                // Execute Action
+                 if (action.action === 'BUILD_UNIT' && action.unitType && action.buildHexId) {
+                     handleConstruct(action.unitType, 'UNIT', action.buildHexId);
+                 } else if (action.action === 'BUILD_STRUCTURE' && action.structureType && action.buildHexId) {
+                     handleConstruct(action.structureType, 'STRUCTURE', action.buildHexId);
+                 } else if (action.action === 'RESEARCH' && action.techType) {
+                     handleResearch(action.techType);
+                 } else if (action.action === 'MOVE' && action.fromHexId && action.toHexId) {
+                     handleMove(action.fromHexId, action.toHexId);
+                 }
+                 
+                 // Artificial delay between AI moves
+                 await new Promise(r => setTimeout(r, 800));
+            }
+            
+            // End turn
+            endTurn();
+        };
+
+        processAITurn();
+    }
+  }, [gameState.currentPlayerIndex, gameState.turn, isOnline, setupMode, gameState.winner]);
+
+
+  const handleResearch = useCallback((tech: TechType) => {
+      setGameState(prev => {
+        const player = prev.players[prev.currentPlayerIndex];
+        // Allow AI to research or current player
+        if (isOnline && player.color !== localPlayerColor) return prev; 
+        if (player.techs.includes(tech)) return prev;
+
+        const cost = TECH_STATS[tech].cost;
+        const canAfford = RESOURCES.every(r => player.resources[r] >= cost[r]);
+        if (!canAfford) return { ...prev, gameLog: ["Not enough resources to research.", ...prev.gameLog] };
+
+        const updatedPlayers = prev.players.map(p => {
+            if (p.color === player.color) {
+              const newRes = { ...p.resources };
+              RESOURCES.forEach(r => newRes[r] -= cost[r]);
+              return { ...p, resources: newRes, techs: [...p.techs, tech] };
+            }
+            return p;
+        });
+
+        playSound('BUILD');
+        addEffect("Researched!", prev.tiles[Object.keys(prev.tiles).find(k => prev.tiles[k].isHQ && prev.tiles[k].controller === player.color) || Object.keys(prev.tiles)[0]]?.id || "0,0,0", "#60a5fa");
+
+        const nextState = { ...prev, players: updatedPlayers, gameLog: [`${player.color} researched ${TECH_STATS[tech].name}`, ...prev.gameLog] };
+        if (isOnline && matchId) updateMatchState(matchId, nextState);
+        return nextState;
+      });
+  }, [isOnline, localPlayerColor, matchId, addEffect]);
 
   const handleConstruct = useCallback((itemId: string, itemCategory: 'UNIT' | 'STRUCTURE', hexId: string) => {
     setGameState(prev => {
         const player = prev.players[prev.currentPlayerIndex];
+        // AI check or Local player check
         if (isOnline && player.color !== localPlayerColor) return prev;
         
         const tile = prev.tiles[hexId];
         if (!tile) return prev;
         
+        // General checks
+        if (tile.controller !== player.color) return prev;
+        if (itemCategory === 'UNIT' && tile.unitId) return prev;
+        if (itemCategory === 'STRUCTURE' && itemId === StructureType.ROAD && tile.hasRoad) return prev;
+        
+        if (tile.structure === StructureType.MONOLITH || tile.structure === StructureType.WONDER) {
+             return { ...prev, gameLog: ["Cannot build here.", ...prev.gameLog] };
+        }
+        
+        // --- NAVAL RULES ENFORCEMENT ---
+        const isWater = tile.resource === 'WATER';
+        const isShip = itemId === UnitType.GALLEY;
+        const isPort = itemId === StructureType.PORT;
+        
+        if (isShip) {
+            // Rule 1: Must have Seafaring
+            if (!player.techs.includes(TechType.SEAFARING)) {
+                return { ...prev, gameLog: ["Requires Seafaring Tech.", ...prev.gameLog] };
+            }
+            // Rule 2: Must be on water
+            if (!isWater) return { ...prev, gameLog: ["Galleys must be built on water.", ...prev.gameLog] };
+            
+            // Rule 3: Must be adjacent to a PORT owned by player
+            const neighbors = getNeighbors(tile);
+            const adjacentPort = neighbors.some(n => {
+                const nId = getHexId(n.q, n.r, n.s);
+                const nTile = prev.tiles[nId];
+                return nTile && nTile.controller === player.color && nTile.structure === StructureType.PORT;
+            });
+            
+            if (!adjacentPort) return { ...prev, gameLog: ["Galleys must be built next to a Port.", ...prev.gameLog] };
+            
+        } 
+        else if (isPort) {
+            // Rule 1: Requires Seafaring
+            if (!player.techs.includes(TechType.SEAFARING)) return { ...prev, gameLog: ["Requires Seafaring Tech.", ...prev.gameLog] };
+            
+            // Rule 2: Must be on land
+            if (isWater) return { ...prev, gameLog: ["Ports must be built on land.", ...prev.gameLog] };
+            
+            // Rule 3: Must be adjacent to water
+            const neighbors = getNeighbors(tile);
+            const hasWater = neighbors.some(n => prev.tiles[getHexId(n.q, n.r, n.s)]?.resource === 'WATER');
+            if (!hasWater) return { ...prev, gameLog: ["Ports must be coastal.", ...prev.gameLog] };
+        }
+        else if (itemCategory === 'UNIT') {
+            // Land units cannot be built on water
+            if (isWater) return { ...prev, gameLog: ["Cannot build land units on water.", ...prev.gameLog] };
+        }
+        else if (itemCategory === 'STRUCTURE' && isWater) {
+             return { ...prev, gameLog: ["Cannot build structures on water.", ...prev.gameLog] };
+        }
+
         let cost: Record<ResourceType, number> = itemCategory === 'UNIT' ? UNIT_STATS[itemId as UnitType].cost : STRUCTURE_STATS[itemId as StructureType].cost;
+        
+        // Masons Discount
+        if (player.color === PlayerColor.YELLOW) {
+            if (itemId === StructureType.WALL || itemId === StructureType.CITY) {
+                const discountedCost = { ...cost };
+                RESOURCES.forEach(r => {
+                    if (discountedCost[r] > 0) discountedCost[r] = Math.max(1, discountedCost[r] - 1);
+                });
+                cost = discountedCost;
+            }
+        }
+
         const canAfford = RESOURCES.every(r => player.resources[r] >= cost[r]);
         if (!canAfford) return { ...prev, gameLog: ["Not enough resources.", ...prev.gameLog] };
 
@@ -334,7 +600,8 @@ export const useGameEngine = () => {
         
         let updatedTiles = { ...prev.tiles };
         let updatedUnits = { ...prev.units };
-        
+        let newWonderState = { wonderBuiltAt: prev.wonderBuiltAt, wonderOwner: prev.wonderOwner };
+
         if (itemCategory === 'UNIT') {
             const newUnitId = uuidv4();
             const stats = UNIT_STATS[itemId as UnitType];
@@ -342,46 +609,33 @@ export const useGameEngine = () => {
                 id: newUnitId, owner: player.color, type: itemId as UnitType,
                 power: stats.power, movesLeft: 0, maxMoves: stats.moves, revealed: false
             };
-            updatedTiles[hexId] = { ...updatedTiles[hexId], unitId: newUnitId };
+            updatedTiles[hexId] = { ...updatedTiles[hexId], unitId: newUnitId, controller: player.color };
+            addEffect("Unit Ready", hexId, "#4ade80");
         } else {
             const struct = itemId as StructureType;
             if (struct === StructureType.WALL) updatedTiles[hexId] = { ...updatedTiles[hexId], hasWall: true };
             else if (struct === StructureType.ROAD) updatedTiles[hexId] = { ...updatedTiles[hexId], hasRoad: true };
-            else updatedTiles[hexId] = { ...updatedTiles[hexId], structure: struct };
+            else {
+                updatedTiles[hexId] = { ...updatedTiles[hexId], structure: struct };
+                if (struct === StructureType.WONDER) {
+                    newWonderState.wonderBuiltAt = prev.turn;
+                    newWonderState.wonderOwner = player.color;
+                    addEffect("WONDER STARTED", hexId, "#eab308");
+                }
+            }
+            if (struct !== StructureType.WONDER) addEffect("Built", hexId, "#fbbf24");
         }
         
-        // Ensure frontier expands if building unit or gaining territory (not applicable to unit build directly unless it claims, but safe to run)
         updatedTiles = ensureFrontier(updatedTiles);
+        playSound('BUILD');
 
-        const nextState = { ...prev, players: updatedPlayers, units: updatedUnits, tiles: updatedTiles, gameLog: [`${player.color} built ${itemId}`, ...prev.gameLog] };
-        nextState.visibleHexes = calculateVisibleHexes(nextState, getViewerColor(nextState));
+        const nextState = { ...prev, ...newWonderState, players: updatedPlayers, units: updatedUnits, tiles: updatedTiles, gameLog: [`${player.color} built ${itemId}`, ...prev.gameLog] };
+        nextState.visibleHexes = getVisibleHexes(nextState, isSpectatorMode);
         
         if (isOnline && matchId) updateMatchState(matchId, nextState);
         return nextState;
     });
-  }, [isOnline, localPlayerColor, matchId]);
-
-  const handleTrade = useCallback((giveResource: ResourceType, getResource: ResourceType) => {
-    setGameState(prev => {
-        const player = prev.players[prev.currentPlayerIndex];
-        const tradeRate = 3;
-        if (player.resources[giveResource] < tradeRate) return prev;
-
-        const updatedPlayers = prev.players.map(p => {
-            if (p.color === player.color) {
-                const newRes = { ...p.resources };
-                newRes[giveResource] -= tradeRate;
-                newRes[getResource] += 1;
-                return { ...p, resources: newRes };
-            }
-            return p;
-        });
-
-        const nextState = { ...prev, players: updatedPlayers, gameLog: [`Traded ${tradeRate} ${giveResource} for 1 ${getResource}.`, ...prev.gameLog] };
-        if (isOnline && matchId) updateMatchState(matchId, nextState);
-        return nextState;
-    });
-  }, [isOnline, localPlayerColor, matchId]);
+  }, [isOnline, localPlayerColor, matchId, isSpectatorMode, addEffect]);
 
   const handleMove = useCallback((fromHexId: string, toHexId: string) => {
     setGameState(prev => {
@@ -389,142 +643,189 @@ export const useGameEngine = () => {
         if (isOnline && player.color !== localPlayerColor) return prev;
         
         const fromTile = prev.tiles[fromHexId];
-        // Allow moving to a tile that doesn't exist yet (frontier) by checking ID or Tile
-        // BUT for UI interaction, toHexId comes from existing tiles. 
-        // For AI, it might try to move to a non-existent neighbor.
-        // We must check if toHexId is a valid neighbor coordinate even if not in tiles.
-        
-        // Actually, easiest way is to trust `ensureFrontier` has populated neighbors.
         let toTile = prev.tiles[toHexId];
         
-        // Auto-generation fallback (should be covered by ensureFrontier but safety first)
         if (!toTile) {
-             // Re-construct coord from ID
              const parts = toHexId.split(',').map(Number);
              if (parts.length === 3) {
-                 // Check adjacency
-                 const dist = (Math.abs(fromTile.q - parts[0]) + Math.abs(fromTile.q + fromTile.r - parts[0] - parts[1]) + Math.abs(fromTile.r - parts[1])) / 2;
-                 if (dist === 1) {
-                     toTile = generateNewTile(parts[0], parts[1], parts[2]);
-                     // We will add it to updatedTiles later
+                 const dist = Math.max(Math.abs(parts[0]), Math.abs(parts[1]), Math.abs(parts[2]));
+                 if (dist <= MAX_MAP_RADIUS) {
+                      toTile = generateNewTile(parts[0], parts[1], parts[2]);
                  }
              }
         }
 
         if (!fromTile || !toTile) return prev;
-        
         const unitId = fromTile.unitId;
         if (!unitId) return prev;
         const unit = prev.units[unitId];
-        
         if (unit.owner !== player.color || unit.movesLeft <= 0) return prev;
         
-        // Combat Logic
+        // TERRAIN RESTRICTIONS
+        const isShip = unit.type === UnitType.GALLEY;
+        const targetIsWater = toTile.resource === 'WATER';
+        
+        if (isShip && !targetIsWater) return prev; // Ships only on water
+        if (!isShip && targetIsWater) return prev; // Land units only on land (unless Transport added later)
+
         let nextState = prev;
         let newUnits = { ...prev.units };
         let newTiles = { ...prev.tiles };
-        // If we generated a temp toTile, ensure it's in newTiles
+        let updatedPlayers = [...prev.players];
         if (!newTiles[toHexId]) newTiles[toHexId] = toTile;
 
+        // RUINS
+        if (toTile.isRuins && !isShip) {
+             newTiles[toHexId] = { ...newTiles[toHexId], isRuins: false };
+             const lootRoll = Math.random();
+             let rewardMsg = "";
+             updatedPlayers = updatedPlayers.map(p => {
+                 if (p.color === player.color) {
+                     if (lootRoll < 0.4) {
+                         const res = { ...p.resources };
+                         res.WOOD += 2; res.BRICK += 2;
+                         rewardMsg = "Found Supplies (+2 Wood/Brick)";
+                         addEffect("+Res", toHexId, "#fbbf24");
+                         return { ...p, resources: res };
+                     } else if (lootRoll < 0.7) {
+                         const res = { ...p.resources };
+                         res.ORE += 2; res.WHEAT += 2;
+                         rewardMsg = "Ancient Treasure (+2 Ore/Wheat)";
+                         addEffect("+Gold", toHexId, "#fbbf24");
+                         return { ...p, resources: res };
+                     } else {
+                         rewardMsg = "Ancient Magic (Moves Refreshed)";
+                         addEffect("Refresh!", toHexId, "#60a5fa");
+                     }
+                 }
+                 return p;
+             });
+             if (lootRoll >= 0.7) newUnits[unit.id] = { ...unit, movesLeft: unit.maxMoves };
+             nextState = { ...nextState, gameLog: [`Explored Ruins: ${rewardMsg}`, ...prev.gameLog] };
+        }
+
         if (toTile.unitId) {
+            // Combat
             const targetUnit = prev.units[toTile.unitId];
+            const targetPlayer = prev.players.find(p => p.color === targetUnit.owner);
+            
             if (targetUnit.owner === player.color) return prev;
             
-            let defenderTotalPower = targetUnit.power + (TERRAIN_DEFENSE[toTile.resource] || 0) + (toTile.hasWall ? 3 : 0);
+            const factionAttackBonus = player.color === PlayerColor.RED ? 1 : 0;
+            const attackerBonus = (player.techs.includes(TechType.METALLURGY) ? 1 : 0) + factionAttackBonus;
+            const defenderTechBonus = targetPlayer?.techs.includes(TechType.METALLURGY) ? 1 : 0;
+            
+            const attackerPower = unit.power + attackerBonus;
+            
+            let defenseBonus = (TERRAIN_DEFENSE[toTile.resource] || 0);
+            
+            if (targetPlayer?.color === PlayerColor.GREEN && toTile.resource === 'WOOD') {
+                defenseBonus += 1;
+            }
+
+            if (toTile.hasWall) {
+                const masonryBonus = targetPlayer?.techs.includes(TechType.MASONRY) ? 5 : 3;
+                defenseBonus += masonryBonus;
+            } else if (toTile.structure === StructureType.CITY && targetPlayer?.techs.includes(TechType.MASONRY)) {
+                defenseBonus += 1;
+            }
+
+            const defenderPower = targetUnit.power + defenderTechBonus + defenseBonus;
             
             if (newUnits[unit.id]) newUnits[unit.id].revealed = true;
             if (newUnits[targetUnit.id]) newUnits[targetUnit.id].revealed = true;
             
+            let outcome: 'WIN' | 'LOSS' | 'DRAW' = 'DRAW';
+            if (attackerPower > defenderPower) outcome = 'WIN';
+            else if (defenderPower > attackerPower) outcome = 'LOSS';
+            
+            nextState.combatResult = {
+                attacker: { type: unit.type, power: attackerPower, owner: unit.owner },
+                defender: { type: targetUnit.type, power: defenderPower, owner: targetUnit.owner, bonus: defenseBonus + defenderTechBonus },
+                outcome,
+                timestamp: Date.now()
+            };
+
             let msg = '';
-            if (unit.power > defenderTotalPower) {
+            if (outcome === 'WIN') {
                 msg = `${unit.owner} ${unit.type} DEFEATED ${targetUnit.owner} ${targetUnit.type}!`;
                 delete newUnits[targetUnit.id];
                 newTiles[fromHexId] = { ...newTiles[fromHexId], unitId: null };
                 newTiles[toHexId] = { ...newTiles[toHexId], unitId: unit.id, controller: unit.owner };
                 if (newUnits[unit.id]) newUnits[unit.id].movesLeft -= 1;
-            } else if (defenderTotalPower > unit.power) {
+                playSound('ATTACK_WIN');
+            } else if (outcome === 'LOSS') {
                 msg = `${unit.owner} ${unit.type} was SLAIN by ${targetUnit.owner}!`;
                 delete newUnits[unit.id];
                 newTiles[fromHexId] = { ...newTiles[fromHexId], unitId: null };
+                playSound('ATTACK_LOSS');
             } else {
                 msg = `Both units destroyed!`;
                 delete newUnits[unit.id]; delete newUnits[targetUnit.id];
                 newTiles[fromHexId] = { ...newTiles[fromHexId], unitId: null }; 
                 newTiles[toHexId] = { ...newTiles[toHexId], unitId: null };
+                playSound('ATTACK_LOSS');
             }
-            nextState = { ...prev, units: newUnits, tiles: newTiles, gameLog: [msg, ...prev.gameLog] };
+            nextState = { ...nextState, units: newUnits, tiles: newTiles, players: updatedPlayers, gameLog: [msg, ...nextState.gameLog] };
         } else {
-            // Move Logic
+            // Move
+            const isGreenInForest = player.color === PlayerColor.GREEN && toTile.resource === 'WOOD';
+
             newTiles[fromHexId] = { ...newTiles[fromHexId], unitId: null };
             newTiles[toHexId] = { ...newTiles[toHexId], unitId: unit.id, controller: player.color };
-            newUnits[unit.id] = { ...unit, movesLeft: unit.movesLeft - 1 };
-            nextState = { ...prev, tiles: newTiles, units: newUnits, gameLog: [`${player.color} moved to ${toHexId}`, ...prev.gameLog] };
+            
+            if (!toTile.isRuins && !isGreenInForest) {
+                 newUnits[unit.id] = { ...unit, movesLeft: unit.movesLeft - 1 };
+            }
+            nextState = { ...nextState, tiles: newTiles, units: newUnits, players: updatedPlayers, gameLog: [`${player.color} moved to ${toHexId}`, ...nextState.gameLog] };
+            playSound('MOVE');
         }
 
-        // AUTO EXPAND FRONTIER after any move/combat
         nextState.tiles = ensureFrontier(nextState.tiles);
+        nextState.visibleHexes = getVisibleHexes(nextState, isSpectatorMode);
+        if (isOnline && matchId) updateMatchState(matchId, nextState);
+        return nextState;
+    });
+  }, [isOnline, localPlayerColor, matchId, isSpectatorMode, addEffect]);
 
-        nextState.visibleHexes = calculateVisibleHexes(nextState, getViewerColor(nextState));
+  const handleTrade = useCallback((give: ResourceType, get: ResourceType) => {
+    setGameState(prev => {
+        const player = prev.players[prev.currentPlayerIndex];
+        if (isOnline && player.color !== localPlayerColor) return prev;
+        
+        let cost = 3;
+        // Faction Bonus: Blue (Cartel) trades at 2:1
+        if (player.color === PlayerColor.BLUE) cost = 2;
+        
+        // Port Bonus: -1 to trade cost (min 1)
+        const hasPort = (Object.values(prev.tiles) as Tile[]).some(t => t.controller === player.color && t.structure === StructureType.PORT);
+        if (hasPort) cost = Math.max(1, cost - 1);
 
+        if (player.resources[give] < cost) {
+             return { ...prev, gameLog: [`Need ${cost} ${give} to trade for ${get}.`, ...prev.gameLog] };
+        }
+
+        const updatedPlayers = prev.players.map(p => {
+            if (p.color === player.color) {
+              const newRes = { ...p.resources };
+              newRes[give] -= cost;
+              newRes[get] += 1;
+              return { ...p, resources: newRes };
+            }
+            return p;
+        });
+
+        playSound('BUILD');
+        const nextState = { ...prev, players: updatedPlayers, gameLog: [`Traded ${cost} ${give} for 1 ${get}`, ...prev.gameLog] };
+        
         if (isOnline && matchId) updateMatchState(matchId, nextState);
         return nextState;
     });
   }, [isOnline, localPlayerColor, matchId]);
 
-  // AI Turn Logic
-  useEffect(() => {
-    const player = gameState.players[gameState.currentPlayerIndex];
-    
-    if (!isOnline && player.isAI && !gameState.winner && !gameState.isProcessing) {
-        
-        const performAITurn = async () => {
-            setGameState(prev => ({ ...prev, isProcessing: true }));
-            
-            try {
-                await new Promise(resolve => setTimeout(resolve, 1500));
-                
-                const aiAction = await getAIMove(gameStateRef.current, player.color);
-                console.log("AI Action:", aiAction);
-
-                if (aiAction.action === 'MOVE' && aiAction.fromHexId && aiAction.toHexId) {
-                    handleMove(aiAction.fromHexId, aiAction.toHexId);
-                } 
-                else if (aiAction.action === 'BUILD_UNIT' && aiAction.unitType) {
-                    let targetId = aiAction.buildHexId;
-                    if (!targetId) {
-                        const validTiles = (Object.values(gameStateRef.current.tiles) as Tile[]).filter(t => 
-                            t.controller === player.color && !t.unitId
-                        );
-                        const hq = validTiles.find(t => t.isHQ);
-                        if (hq) targetId = hq.id;
-                        else if (validTiles.length > 0) targetId = validTiles[0].id;
-                    }
-                    if (targetId) handleConstruct(aiAction.unitType, 'UNIT', targetId);
-                } 
-                else if (aiAction.action === 'BUILD_STRUCTURE' && aiAction.structureType) {
-                    let targetId = aiAction.buildHexId;
-                    if (!targetId) {
-                         const validTiles = (Object.values(gameStateRef.current.tiles) as Tile[]).filter(t => t.controller === player.color);
-                         if (validTiles.length > 0) targetId = validTiles[0].id;
-                    }
-                    if (targetId) handleConstruct(aiAction.structureType, 'STRUCTURE', targetId);
-                }
-            } catch (e) {
-                console.error("AI Turn Failed:", e);
-            } finally {
-                 // ALWAYS end turn to prevent getting stuck
-                 setTimeout(() => {
-                    endTurn();
-                 }, 500);
-            }
-        };
-        performAITurn();
-    }
-  }, [gameState.currentPlayerIndex, gameState.turn, isOnline, gameState.winner, gameState.isProcessing, handleMove, handleConstruct, endTurn]);
-
   return {
-    gameState, setGameState, startGame, startOnlineGame, joinGame, resumeLastGame, setupMode,
-    handleConstruct, handleMove, handleTrade, endTurn, getCurrentPlayer, isOnline, localPlayerColor, matchId,
+    gameState, setGameState, startGame, startOnlineGame, startSpectatorGame, joinGame, resumeLastGame, setupMode,
+    handleConstruct, handleMove, handleTrade, handleResearch, endTurn, getCurrentPlayer, isOnline, isSpectatorMode, localPlayerColor, matchId,
     firebaseConfigured, saveFirebaseConfig, resetFirebaseConfig, savedMatchId, gameError, isCreatingGame,
     playerId, syncPlayerId
   };

@@ -1,24 +1,42 @@
-export type ResourceType = 'WOOD' | 'BRICK' | 'WHEAT' | 'ORE';
+export type ResourceType = 'WOOD' | 'BRICK' | 'WHEAT' | 'ORE' | 'WATER';
 
 export enum PlayerColor {
-  RED = 'RED', // Human usually
-  BLUE = 'BLUE',
-  GREEN = 'GREEN',
-  YELLOW = 'YELLOW'
+  RED = 'RED', // The Imperium
+  BLUE = 'BLUE', // The Cartel
+  GREEN = 'GREEN', // The Sylvari
+  YELLOW = 'YELLOW' // The Masons
+}
+
+export enum MapType {
+  PANGAEA = 'PANGAEA', // One big landmass
+  ARCHIPELAGO = 'ARCHIPELAGO', // Many islands
+  VOLCANIC = 'VOLCANIC' // High Ore, lots of mountains
 }
 
 export enum UnitType {
   SCOUT = 'SCOUT', // Moves 2, weak
   SOLDIER = 'SOLDIER', // Standard
   KNIGHT = 'KNIGHT', // Strong, expensive
-  GENERAL = 'GENERAL' // Strongest
+  GENERAL = 'GENERAL', // Strongest
+  GALLEY = 'GALLEY' // Naval unit
 }
 
 export enum StructureType {
   SETTLEMENT = 'SETTLEMENT',
   CITY = 'CITY',
   WALL = 'WALL',
-  ROAD = 'ROAD'
+  ROAD = 'ROAD',
+  PORT = 'PORT', // Naval building
+  MONOLITH = 'MONOLITH', // King of the Hill
+  WONDER = 'WONDER' // Age of Empires Victory Condition
+}
+
+export enum TechType {
+  METALLURGY = 'METALLURGY', // +1 Combat Power to all units
+  MASONRY = 'MASONRY', // Walls +5 Def instead of +3, Cities +1 Def
+  LOGISTICS = 'LOGISTICS', // +1 Move to Soldiers/Knights
+  ECONOMICS = 'ECONOMICS', // +1 Gold/Resource per turn base
+  SEAFARING = 'SEAFARING' // Allows building Ports/Galleys
 }
 
 export interface Unit {
@@ -47,6 +65,7 @@ export interface Tile {
   controller: PlayerColor | null;
   unitId: string | null;
   isHQ: boolean;
+  isRuins: boolean; // New exploration feature
   structure: StructureType | null; // Settlement or City
   hasWall: boolean;
   hasRoad: boolean;
@@ -58,7 +77,24 @@ export interface Player {
   resources: Record<ResourceType, number>;
   activeUnits: number;
   eliminated: boolean;
+  techs: TechType[]; // New Tech Tree
   id?: string; 
+}
+
+export interface FloatingText {
+  id: string;
+  x: number;
+  y: number;
+  text: string;
+  color: string;
+  createdAt: number;
+}
+
+export interface CombatResult {
+  attacker: { type: UnitType, power: number, owner: PlayerColor };
+  defender: { type: UnitType, power: number, owner: PlayerColor, bonus: number };
+  outcome: 'WIN' | 'LOSS' | 'DRAW';
+  timestamp: number;
 }
 
 export interface GameState {
@@ -74,14 +110,19 @@ export interface GameState {
   matchId?: string;
   lastUpdated?: number;
   visibleHexes?: string[]; // IDs of hexes visible to the local player/current player
+  effects: FloatingText[]; // Visual only
+  wonderBuiltAt?: number; // Turn number when Wonder was finished
+  wonderOwner?: PlayerColor; // Who built it
+  combatResult?: CombatResult | null; // Trigger for cinematic
 }
 
 export interface AIAction {
-  action: 'MOVE' | 'BUILD_UNIT' | 'BUILD_STRUCTURE' | 'PASS';
+  action: 'MOVE' | 'BUILD_UNIT' | 'BUILD_STRUCTURE' | 'RESEARCH' | 'PASS';
   fromHexId?: string;
   toHexId?: string;
   unitType?: UnitType;
   structureType?: StructureType;
+  techType?: TechType;
   buildHexId?: string;
   reasoning?: string;
 }
