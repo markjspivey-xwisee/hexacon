@@ -80,12 +80,47 @@ const createInitialState = (numPlayers: number, mapType: MapType = MapType.PANGA
 
   players.forEach((p, idx) => {
     let hqId = startIds[idx] && tiles[startIds[idx]] ? startIds[idx] : Object.keys(tiles)[idx];
-    // Ensure HQ is on Land
+    
+    // --- MAP BALANCING: Ensure Playable Start ---
+    
+    // 1. If the designated start is water, try to move to adjacent land
     if (tiles[hqId].resource === 'WATER') {
         const neighbors = getNeighbors(tiles[hqId]);
         const landNeighbor = neighbors.find(n => tiles[getHexId(n.q, n.r, n.s)]?.resource !== 'WATER');
-        if (landNeighbor) hqId = getHexId(landNeighbor.q, landNeighbor.r, landNeighbor.s);
-        else tiles[hqId].resource = 'WHEAT'; // Force land
+        if (landNeighbor) {
+            hqId = getHexId(landNeighbor.q, landNeighbor.r, landNeighbor.s);
+        }
+    }
+
+    // 2. Force HQ tile to be land if it's still water
+    if (tiles[hqId].resource === 'WATER') {
+        tiles[hqId].resource = 'WHEAT';
+        tiles[hqId].terrain = TERRAIN_TYPE['WHEAT'];
+    }
+
+    // 3. Terraform Surroundings: Ensure at least 3 land tiles nearby
+    // This prevents players from being stranded on a single tile island
+    const neighbors = getNeighbors(tiles[hqId]);
+    let landNeighbors = neighbors.filter(n => {
+        const t = tiles[getHexId(n.q, n.r, n.s)];
+        return t && t.resource !== 'WATER';
+    });
+
+    if (landNeighbors.length < 3) {
+        const resourcesToInject: ResourceType[] = ['WOOD', 'BRICK', 'ORE', 'WHEAT'];
+        let injectionIdx = 0;
+
+        neighbors.forEach(n => {
+            const nid = getHexId(n.q, n.r, n.s);
+            // Convert up to 3 neighbors to land to guarantee a 4-tile island minimum
+            if (tiles[nid] && tiles[nid].resource === 'WATER' && landNeighbors.length < 3) {
+                 const newRes = resourcesToInject[injectionIdx % resourcesToInject.length];
+                 tiles[nid].resource = newRes;
+                 tiles[nid].terrain = TERRAIN_TYPE[newRes];
+                 injectionIdx++;
+                 landNeighbors.push(n);
+            }
+        });
     }
 
     if (tiles[hqId]) {
@@ -430,27 +465,22 @@ export const useGameEngine = () => {
     });
   }, [isOnline, matchId, localPlayerColor, isSpectatorMode]); 
 
-  // --- AI LOGIC LOOP (Fixed) ---
+  // --- AI LOGIC LOOP ---
   useEffect(() => {
-    // Only run if offline game or I am the host/local and it's AI turn (for simplicity in local vs AI)
-    // Actually, for local play: logic runs on client.
-    if (isOnline) return; // Online AI handling is complex, assume handled by host or disabled for now in this scope
+    if (isOnline) return; 
     if (setupMode) return;
     if (gameState.winner) return;
     
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     if (currentPlayer.isAI && !currentPlayer.eliminated && !gameState.isProcessing) {
         
-        // Flag processing to prevent double-execution
         setGameState(prev => ({ ...prev, isProcessing: true }));
 
         const processAITurn = async () => {
-            // Wait a beat for UI update
             await new Promise(r => setTimeout(r, 600));
 
             const aiPlayer = gameStateRef.current.players[gameStateRef.current.currentPlayerIndex];
             
-            // AI Action Loop
             for (let i = 0; i < 3; i++) {
                 if (gameStateRef.current.winner) break;
 
@@ -458,7 +488,6 @@ export const useGameEngine = () => {
                 
                 if (action.action === 'PASS') break;
 
-                // Execute Action
                  if (action.action === 'BUILD_UNIT' && action.unitType && action.buildHexId) {
                      handleConstruct(action.unitType, 'UNIT', action.buildHexId);
                  } else if (action.action === 'BUILD_STRUCTURE' && action.structureType && action.buildHexId) {
@@ -469,11 +498,8 @@ export const useGameEngine = () => {
                      handleMove(action.fromHexId, action.toHexId);
                  }
                  
-                 // Artificial delay between AI moves
                  await new Promise(r => setTimeout(r, 800));
             }
-            
-            // End turn
             endTurn();
         };
 
@@ -483,9 +509,11 @@ export const useGameEngine = () => {
 
 
   const handleResearch = useCallback((tech: TechType) => {
+      // Defensive input sanitation
+      if (typeof tech !== 'string') return;
+      
       setGameState(prev => {
         const player = prev.players[prev.currentPlayerIndex];
-        // Allow AI to research or current player
         if (isOnline && player.color !== localPlayerColor) return prev; 
         if (player.techs.includes(tech)) return prev;
 
@@ -512,15 +540,16 @@ export const useGameEngine = () => {
   }, [isOnline, localPlayerColor, matchId, addEffect]);
 
   const handleConstruct = useCallback((itemId: string, itemCategory: 'UNIT' | 'STRUCTURE', hexId: string) => {
+    // Defensive input sanitation
+    if (typeof itemId !== 'string' || typeof hexId !== 'string') return;
+
     setGameState(prev => {
         const player = prev.players[prev.currentPlayerIndex];
-        // AI check or Local player check
         if (isOnline && player.color !== localPlayerColor) return prev;
         
         const tile = prev.tiles[hexId];
         if (!tile) return prev;
         
-        // General checks
         if (tile.controller !== player.color) return prev;
         if (itemCategory === 'UNIT' && tile.unitId) return prev;
         if (itemCategory === 'STRUCTURE' && itemId === StructureType.ROAD && tile.hasRoad) return prev;
@@ -529,20 +558,16 @@ export const useGameEngine = () => {
              return { ...prev, gameLog: ["Cannot build here.", ...prev.gameLog] };
         }
         
-        // --- NAVAL RULES ENFORCEMENT ---
         const isWater = tile.resource === 'WATER';
         const isShip = itemId === UnitType.GALLEY;
         const isPort = itemId === StructureType.PORT;
         
         if (isShip) {
-            // Rule 1: Must have Seafaring
             if (!player.techs.includes(TechType.SEAFARING)) {
                 return { ...prev, gameLog: ["Requires Seafaring Tech.", ...prev.gameLog] };
             }
-            // Rule 2: Must be on water
             if (!isWater) return { ...prev, gameLog: ["Galleys must be built on water.", ...prev.gameLog] };
             
-            // Rule 3: Must be adjacent to a PORT owned by player
             const neighbors = getNeighbors(tile);
             const adjacentPort = neighbors.some(n => {
                 const nId = getHexId(n.q, n.r, n.s);
@@ -554,19 +579,14 @@ export const useGameEngine = () => {
             
         } 
         else if (isPort) {
-            // Rule 1: Requires Seafaring
             if (!player.techs.includes(TechType.SEAFARING)) return { ...prev, gameLog: ["Requires Seafaring Tech.", ...prev.gameLog] };
-            
-            // Rule 2: Must be on land
             if (isWater) return { ...prev, gameLog: ["Ports must be built on land.", ...prev.gameLog] };
             
-            // Rule 3: Must be adjacent to water
             const neighbors = getNeighbors(tile);
             const hasWater = neighbors.some(n => prev.tiles[getHexId(n.q, n.r, n.s)]?.resource === 'WATER');
             if (!hasWater) return { ...prev, gameLog: ["Ports must be coastal.", ...prev.gameLog] };
         }
         else if (itemCategory === 'UNIT') {
-            // Land units cannot be built on water
             if (isWater) return { ...prev, gameLog: ["Cannot build land units on water.", ...prev.gameLog] };
         }
         else if (itemCategory === 'STRUCTURE' && isWater) {
@@ -575,7 +595,6 @@ export const useGameEngine = () => {
 
         let cost: Record<ResourceType, number> = itemCategory === 'UNIT' ? UNIT_STATS[itemId as UnitType].cost : STRUCTURE_STATS[itemId as StructureType].cost;
         
-        // Masons Discount
         if (player.color === PlayerColor.YELLOW) {
             if (itemId === StructureType.WALL || itemId === StructureType.CITY) {
                 const discountedCost = { ...cost };
@@ -638,6 +657,9 @@ export const useGameEngine = () => {
   }, [isOnline, localPlayerColor, matchId, isSpectatorMode, addEffect]);
 
   const handleMove = useCallback((fromHexId: string, toHexId: string) => {
+    // Defensive input sanitation
+    if (typeof fromHexId !== 'string' || typeof toHexId !== 'string') return;
+
     setGameState(prev => {
         const player = prev.players[prev.currentPlayerIndex];
         if (isOnline && player.color !== localPlayerColor) return prev;
@@ -661,12 +683,11 @@ export const useGameEngine = () => {
         const unit = prev.units[unitId];
         if (unit.owner !== player.color || unit.movesLeft <= 0) return prev;
         
-        // TERRAIN RESTRICTIONS
         const isShip = unit.type === UnitType.GALLEY;
         const targetIsWater = toTile.resource === 'WATER';
         
-        if (isShip && !targetIsWater) return prev; // Ships only on water
-        if (!isShip && targetIsWater) return prev; // Land units only on land (unless Transport added later)
+        if (isShip && !targetIsWater) return prev; 
+        if (!isShip && targetIsWater) return prev; 
 
         let nextState = prev;
         let newUnits = { ...prev.units };
@@ -674,7 +695,6 @@ export const useGameEngine = () => {
         let updatedPlayers = [...prev.players];
         if (!newTiles[toHexId]) newTiles[toHexId] = toTile;
 
-        // RUINS
         if (toTile.isRuins && !isShip) {
              newTiles[toHexId] = { ...newTiles[toHexId], isRuins: false };
              const lootRoll = Math.random();
@@ -705,7 +725,6 @@ export const useGameEngine = () => {
         }
 
         if (toTile.unitId) {
-            // Combat
             const targetUnit = prev.units[toTile.unitId];
             const targetPlayer = prev.players.find(p => p.color === targetUnit.owner);
             
@@ -768,7 +787,6 @@ export const useGameEngine = () => {
             }
             nextState = { ...nextState, units: newUnits, tiles: newTiles, players: updatedPlayers, gameLog: [msg, ...nextState.gameLog] };
         } else {
-            // Move
             const isGreenInForest = player.color === PlayerColor.GREEN && toTile.resource === 'WOOD';
 
             newTiles[fromHexId] = { ...newTiles[fromHexId], unitId: null };
@@ -794,10 +812,8 @@ export const useGameEngine = () => {
         if (isOnline && player.color !== localPlayerColor) return prev;
         
         let cost = 3;
-        // Faction Bonus: Blue (Cartel) trades at 2:1
         if (player.color === PlayerColor.BLUE) cost = 2;
         
-        // Port Bonus: -1 to trade cost (min 1)
         const hasPort = (Object.values(prev.tiles) as Tile[]).some(t => t.controller === player.color && t.structure === StructureType.PORT);
         if (hasPort) cost = Math.max(1, cost - 1);
 

@@ -44,8 +44,8 @@ export const generateNewTile = (q: number, r: number, s: number, mapType: MapTyp
     let res: ResourceType = 'WOOD';
     
     if (mapType === MapType.ARCHIPELAGO) {
-        // High water presence
-        if (Math.sin(q * 0.5) * Math.cos(r * 0.5) > 0.1) {
+        // High water presence, but slightly tuned down from 0.1 to 0.15 to connect islands better
+        if (Math.sin(q * 0.5) * Math.cos(r * 0.5) > 0.15) {
              res = 'WATER';
         } else {
              if (noise > 1.2) res = 'ORE';
