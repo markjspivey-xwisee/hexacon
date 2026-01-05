@@ -7,11 +7,28 @@ import { Trees, Mountain, Wheat, BrickWall, Castle, User, EyeOff, Shield, Home, 
 interface HexGridProps {
   gameState: GameState;
   onTileClick: (tileId: string) => void;
-  validMoves?: string[]; // IDs of tiles valid for moving to
-  validAttacks?: string[]; // IDs of tiles valid for attacking
+  validMoves?: string[]; 
+  validAttacks?: string[];
 }
 
-// 1. Base Tile Renderer
+// Map PlayerColor to specific Hex codes for SVG fills (Tailwind 500 equivalent)
+const UNIT_BG_COLORS: Record<PlayerColor, string> = {
+  [PlayerColor.RED]: '#ef4444',
+  [PlayerColor.BLUE]: '#3b82f6',
+  [PlayerColor.GREEN]: '#22c55e',
+  [PlayerColor.YELLOW]: '#eab308',
+};
+
+// Helper to generate hex points
+const getHexPointsString = (radius: number) => {
+    const angles = [0, 60, 120, 180, 240, 300];
+    return angles.map(angle => {
+      const rad = Math.PI / 180 * angle;
+      return `${radius * Math.cos(rad)},${radius * Math.sin(rad)}`;
+    }).join(' ');
+};
+
+// 1. Base Tile Renderer (Pure SVG)
 const HexTileBase: React.FC<{
   tile: Tile;
   isVisible: boolean;
@@ -21,13 +38,9 @@ const HexTileBase: React.FC<{
   onHover: (tileId: string | null) => void;
 }> = ({ tile, isVisible, defenseBonus, onClick, cursorClass, onHover }) => {
   const { x, y } = hexToPixel(tile);
-  const points = useMemo(() => {
-    const angles = [0, 60, 120, 180, 240, 300];
-    return angles.map(angle => {
-      const rad = Math.PI / 180 * angle;
-      return `${HEX_SIZE * Math.cos(rad)},${HEX_SIZE * Math.sin(rad)}`;
-    }).join(' ');
-  }, []);
+  
+  const points = useMemo(() => getHexPointsString(HEX_SIZE), []);
+  const wallPoints = useMemo(() => getHexPointsString(HEX_SIZE - 6), []);
 
   let fillColor = RESOURCE_COLORS[tile.resource] || '#94a3b8';
   let stroke = '#1e293b'; 
@@ -41,11 +54,15 @@ const HexTileBase: React.FC<{
       stroke = '#0f172a';
   }
 
-  const TerrainIcon = () => {
-    if (!isVisible) return <EyeOff size={16} className="text-slate-700 opacity-20" />;
-    if (tile.structure === StructureType.MONOLITH) return <Gem size={24} className="text-violet-400 drop-shadow-[0_0_15px_rgba(167,139,250,0.6)] animate-pulse" />;
-    if (tile.structure === StructureType.WONDER) return <Star size={24} className="text-yellow-400 drop-shadow-[0_0_15px_rgba(234,179,8,0.8)] animate-spin-slow" fill="currentColor" />;
-    const iconProps = { size: 16, className: "opacity-40 text-slate-200" };
+  const TerrainIconElement = () => {
+    if (!isVisible) return <EyeOff size={20} x={-10} y={-10} className="text-slate-700 opacity-20" />;
+    
+    // Special Structures
+    if (tile.structure === StructureType.MONOLITH) return <Gem size={32} x={-16} y={-16} className="text-violet-400 drop-shadow-[0_0_15px_rgba(167,139,250,0.6)]" />;
+    if (tile.structure === StructureType.WONDER) return <Star size={32} x={-16} y={-16} className="text-yellow-400 drop-shadow-[0_0_15px_rgba(234,179,8,0.8)]" fill="currentColor" />;
+    
+    // Resources
+    const iconProps = { size: 24, x: -12, y: -12, className: "opacity-40 text-slate-200" };
     switch (tile.resource) {
       case 'WOOD': return <Trees {...iconProps} />;
       case 'ORE': return <Mountain {...iconProps} />;
@@ -58,42 +75,52 @@ const HexTileBase: React.FC<{
   return (
     <g transform={`translate(${x}, ${y})`} onClick={onClick} onMouseEnter={() => onHover(tile.id)} onMouseLeave={() => onHover(null)} className={`${cursorClass} transition-all duration-200`}>
       <polygon points={points} fill={fillColor} stroke={stroke} strokeWidth={strokeWidth} />
-      {isVisible && tile.hasWall && <polygon points={points} fill="none" stroke="#94a3b8" strokeWidth="6" className="opacity-80" />}
+      
+      {/* Visual Road Path (Ground Layer) */}
+      {isVisible && tile.hasRoad && (
+         <g className="pointer-events-none opacity-40">
+            <line x1={-14} y1={0} x2={14} y2={0} stroke="#e2e8f0" strokeWidth="4" strokeLinecap="round" />
+            <line x1={0} y1={-14} x2={0} y2={14} stroke="#e2e8f0" strokeWidth="4" strokeLinecap="round" />
+            <circle cx={0} cy={0} r={4} fill="#e2e8f0" />
+         </g>
+      )}
+
+      {/* Wall Rendering (Inset) */}
+      {isVisible && tile.hasWall && (
+          <polygon points={wallPoints} fill="none" stroke="#cbd5e1" strokeWidth="4" className="drop-shadow-sm opacity-90" />
+      )}
+
       {!isVisible && <polygon points={points} fill="url(#fogPattern)" fillOpacity={0.4} className="pointer-events-none" />}
       
-      {/* Terrain Icon - Significantly increased size to prevent clipping of Monolith/Wonder glow effects */}
-      <foreignObject x={-30} y={-30} width={60} height={60} className="pointer-events-none">
-         <div className="flex justify-center items-center h-full"><TerrainIcon /></div>
-      </foreignObject>
+      {/* Terrain Icon - Direct SVG */}
+      <g className="pointer-events-none">
+         <TerrainIconElement />
+      </g>
 
-      {/* Buildings */}
-      {isVisible && tile.structure && tile.structure !== StructureType.MONOLITH && tile.structure !== StructureType.WONDER && (
-         <foreignObject x={-20} y={-28} width={40} height={24} className="pointer-events-none">
-            <div className="flex justify-center items-center gap-1">
-               {tile.isHQ && <Castle size={16} className="text-white drop-shadow-md" fill={PLAYER_COLORS[tile.controller!]} />}
-               {!tile.isHQ && tile.structure === StructureType.SETTLEMENT && <Home size={16} className="text-white drop-shadow-md" fill={PLAYER_COLORS[tile.controller!]} />}
-               {!tile.isHQ && tile.structure === StructureType.CITY && <Building2 size={20} className="text-white drop-shadow-md" fill={PLAYER_COLORS[tile.controller!]} />}
-               {tile.structure === StructureType.PORT && <Anchor size={16} className="text-white drop-shadow-md" />}
-               {tile.structure === StructureType.ROAD && <Milestone size={14} className="text-white/50" />}
-            </div>
-         </foreignObject>
+      {/* Buildings - Direct SVG */}
+      {isVisible && (tile.structure || tile.hasRoad) && tile.structure !== StructureType.MONOLITH && tile.structure !== StructureType.WONDER && (
+         <g transform="translate(0, -20)" className="pointer-events-none">
+             {tile.isHQ && <Castle size={20} x={-10} y={-10} className="text-white drop-shadow-md" fill={PLAYER_COLORS[tile.controller!]} />}
+             {!tile.isHQ && tile.structure === StructureType.SETTLEMENT && <Home size={20} x={-10} y={-10} className="text-white drop-shadow-md" fill={PLAYER_COLORS[tile.controller!]} />}
+             {!tile.isHQ && tile.structure === StructureType.CITY && <Building2 size={24} x={-12} y={-12} className="text-white drop-shadow-md" fill={PLAYER_COLORS[tile.controller!]} />}
+             {tile.structure === StructureType.PORT && <Anchor size={20} x={-10} y={-10} className="text-white drop-shadow-md" />}
+             {(tile.structure === StructureType.ROAD || tile.hasRoad) && <Milestone size={16} x={-8} y={-8} className="text-white/80 drop-shadow-md" />}
+         </g>
       )}
 
-      {/* Ruins */}
+      {/* Ruins - Direct SVG */}
       {isVisible && tile.isRuins && !tile.structure && !tile.unitId && (
-          <foreignObject x={-15} y={-15} width={30} height={30} className="pointer-events-none">
-             <div className="flex justify-center items-center h-full animate-bounce"><Sparkles size={16} className="text-yellow-400 drop-shadow-md" /></div>
-          </foreignObject>
+          <g className="pointer-events-none">
+             <Sparkles size={20} x={-10} y={-10} className="text-yellow-400 drop-shadow-md animate-pulse" />
+          </g>
       )}
 
-      {/* Defense Shield */}
+      {/* Defense Shield - Direct SVG */}
       {isVisible && (defenseBonus > 0 || tile.hasWall) && (
-          <foreignObject x={8} y={-24} width={24} height={24} className="pointer-events-auto">
-             <div className="flex items-center justify-center bg-slate-800 rounded-full w-5 h-5 border border-slate-600 shadow-md cursor-help hover:scale-110 transition-transform" 
-                  title={`Defense: ${defenseBonus} (Terrain) ${tile.hasWall ? '+3 (Wall)' : ''}`}>
-                <Shield size={10} className={tile.hasWall ? "text-orange-400" : "text-blue-400"} fill="currentColor" />
-             </div>
-          </foreignObject>
+          <g transform="translate(10, -22)" className="pointer-events-auto">
+             <circle r={9} fill="#1e293b" stroke="#475569" strokeWidth={1} />
+             <Shield size={10} x={-5} y={-5} className={tile.hasWall ? "text-orange-400" : "text-blue-400"} fill="currentColor" />
+          </g>
       )}
     </g>
   );
@@ -108,40 +135,24 @@ const TileOverlay: React.FC<{
     isVisible: boolean;
 }> = ({ tile, isSelected, isValidMove, isValidAttack, isVisible }) => {
     const { x, y } = hexToPixel(tile);
-    const points = useMemo(() => {
-        const angles = [0, 60, 120, 180, 240, 300];
-        return angles.map(angle => {
-            const rad = Math.PI / 180 * angle;
-            return `${HEX_SIZE * Math.cos(rad)},${HEX_SIZE * Math.sin(rad)}`;
-        }).join(' ');
-    }, []);
+    const points = useMemo(() => getHexPointsString(HEX_SIZE), []);
 
     if (!isVisible) return null;
 
     let stroke = "none";
     let strokeWidth = 0;
-    let className = "pointer-events-none";
 
-    // Monolith/Wonder Borders
-    if (tile.structure === StructureType.MONOLITH) {
-        stroke = '#8b5cf6'; strokeWidth = 5;
-    }
-    if (tile.structure === StructureType.WONDER) {
-        stroke = '#eab308'; strokeWidth = 5;
-    }
+    if (tile.structure === StructureType.MONOLITH) { stroke = '#8b5cf6'; strokeWidth = 5; }
+    if (tile.structure === StructureType.WONDER) { stroke = '#eab308'; strokeWidth = 5; }
 
-    if (isSelected) {
-        stroke = '#ffffff'; strokeWidth = 4;
-    } else if (isValidAttack) {
-        stroke = '#ef4444'; strokeWidth = 4;
-    } else if (isValidMove) {
-        stroke = '#22c55e'; strokeWidth = 4;
-    }
+    if (isSelected) { stroke = '#ffffff'; strokeWidth = 4; } 
+    else if (isValidAttack) { stroke = '#ef4444'; strokeWidth = 4; } 
+    else if (isValidMove) { stroke = '#22c55e'; strokeWidth = 4; }
 
     if (stroke === "none" && !isValidMove && !isValidAttack) return null;
 
     return (
-        <g transform={`translate(${x}, ${y})`} className={className}>
+        <g transform={`translate(${x}, ${y})`} className="pointer-events-none">
              <polygon points={points} fill="none" stroke={stroke} strokeWidth={strokeWidth} />
              {isValidMove && <circle r={HEX_SIZE * 0.3} fill="#22c55e" fillOpacity={0.4} className="animate-pulse" />}
              {isValidAttack && <circle r={HEX_SIZE * 0.3} fill="#ef4444" fillOpacity={0.4} className="animate-pulse" />}
@@ -149,7 +160,7 @@ const TileOverlay: React.FC<{
     );
 };
 
-// 3. Unit Renderer
+// 3. Unit Renderer (Pure SVG)
 const UnitToken: React.FC<{ tile: Tile; gameState: GameState; isVisible: boolean }> = ({ tile, gameState, isVisible }) => {
     if (!tile.unitId || !isVisible) return null;
     const unit = gameState.units[tile.unitId];
@@ -159,13 +170,13 @@ const UnitToken: React.FC<{ tile: Tile; gameState: GameState; isVisible: boolean
     const isMyUnit = unit.owner === gameState.players[gameState.currentPlayerIndex].color;
     const isHidden = !isMyUnit && !unit.revealed;
 
-    const UnitIcon = () => {
-        const props = { size: 18, className: "text-white drop-shadow-md" };
-        if (isHidden) return <span className="text-xl font-bold text-white">?</span>;
+    const IconElement = () => {
+        const props = { size: 20, x: -10, y: -10, color: "white" };
+        if (isHidden) return <text x={0} y={0} textAnchor="middle" dominantBaseline="central" fill="white" fontSize={20} fontWeight="bold">?</text>;
         switch(unit.type) {
-            case UnitType.SCOUT: return <Compass {...props} />; // Unique Icon
+            case UnitType.SCOUT: return <Compass {...props} />;
             case UnitType.SOLDIER: return <User {...props} />;
-            case UnitType.KNIGHT: return <Axe {...props} />; // Distinguish from Soldier
+            case UnitType.KNIGHT: return <Axe {...props} />;
             case UnitType.GENERAL: return <Crown {...props} />;
             case UnitType.GALLEY: return <Ship {...props} />;
             default: return <User {...props} />;
@@ -174,49 +185,51 @@ const UnitToken: React.FC<{ tile: Tile; gameState: GameState; isVisible: boolean
 
     return (
         <g transform={`translate(${x}, ${y})`} className="pointer-events-none">
-            <foreignObject x={-32} y={-32} width={64} height={64}>
-                <div className="w-full h-full flex items-center justify-center">
-                    <div className={`w-9 h-9 rounded-full flex items-center justify-center border-2 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.5)] relative
-                        ${PLAYER_BG_COLORS[unit.owner]} ${unit.movesLeft === 0 ? 'grayscale opacity-80' : ''}`}
-                        style={{ borderColor: 'white' }}
-                    >
-                        <div className="absolute inset-0.5 rounded-full border border-white/20"></div>
-                        
-                        <UnitIcon />
+            {/* Shadow */}
+            <circle r={18} cx={1} cy={1} fill="black" opacity={0.4} />
+            
+            {/* Main Token */}
+            <circle 
+                r={18} 
+                fill={UNIT_BG_COLORS[unit.owner]} 
+                stroke="white" 
+                strokeWidth={2}
+                opacity={unit.movesLeft === 0 ? 0.7 : 1}
+                filter={unit.movesLeft === 0 ? 'grayscale(100%)' : 'none'}
+            />
+            
+            {/* Unit Icon */}
+            <IconElement />
 
-                        {/* Movement Indicator (Top Center) */}
-                        {isMyUnit && (
-                            <div className="absolute -top-2 left-1/2 -translate-x-1/2 bg-green-500 text-white text-[9px] font-bold px-1.5 h-4 min-w-[16px] flex items-center justify-center rounded-full border border-white shadow-sm z-30">
-                                {unit.movesLeft}
-                            </div>
-                        )}
+            {/* Badges - Pure SVG */}
+            {!isHidden && (
+                <>
+                    {/* Attack (Bottom Left) */}
+                    <circle r={7} cx={-12} cy={12} fill="#dc2626" stroke="white" strokeWidth={1} />
+                    <text x={-12} y={13} textAnchor="middle" dominantBaseline="middle" fill="white" fontSize={9} fontWeight="bold">{unit.attack}</text>
 
-                        {/* Stats Row at Bottom */}
-                        {!isHidden && (
-                            <>
-                                {/* Attack Badge (Bottom Left) */}
-                                <div className="absolute -bottom-1 -left-1 w-4 h-4 bg-red-600 rounded-full flex items-center justify-center border border-white shadow-sm z-20">
-                                    <span className="text-[9px] font-black text-white leading-none">{unit.attack}</span>
-                                </div>
+                    {/* Defense (Bottom Right) */}
+                    <circle r={7} cx={12} cy={12} fill="#2563eb" stroke="white" strokeWidth={1} />
+                    <text x={12} y={13} textAnchor="middle" dominantBaseline="middle" fill="white" fontSize={9} fontWeight="bold">{unit.defense}</text>
+                </>
+            )}
 
-                                {/* Defense Badge (Bottom Right) */}
-                                <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-blue-600 rounded-full flex items-center justify-center border border-white shadow-sm z-20">
-                                    <span className="text-[9px] font-black text-white leading-none">{unit.defense}</span>
-                                </div>
-                            </>
-                        )}
-                    </div>
-                </div>
-            </foreignObject>
+            {/* Moves (Top Center) */}
+            {isMyUnit && unit.movesLeft > 0 && (
+                <>
+                    <rect x={-8} y={-22} width={16} height={10} rx={5} fill="#22c55e" stroke="white" strokeWidth={1} />
+                    <text x={0} y={-16} textAnchor="middle" dominantBaseline="middle" fill="white" fontSize={9} fontWeight="bold">{unit.movesLeft}</text>
+                </>
+            )}
         </g>
     );
 };
 
-// 4. Tooltip Component
+// 4. Tooltip Component (Pure SVG)
 const Tooltip: React.FC<{ tile: Tile | null; gameState: GameState }> = ({ tile, gameState }) => {
     if (!tile) return null;
     const { x, y } = hexToPixel(tile);
-    const tooltipX = x + 30; 
+    const tooltipX = x + 35; 
     const tooltipY = y - 60;
     
     const isVisible = gameState.visibleHexes ? gameState.visibleHexes.includes(tile.id) : true;
@@ -225,47 +238,51 @@ const Tooltip: React.FC<{ tile: Tile | null; gameState: GameState }> = ({ tile, 
     const unit = tile.unitId ? gameState.units[tile.unitId] : null;
     const isMyUnit = unit && unit.owner === gameState.players[gameState.currentPlayerIndex].color;
     
-    if (!unit && !tile.structure && !tile.isRuins && !tile.isHQ) return null;
+    if (!unit && !tile.structure && !tile.isRuins && !tile.isHQ && !tile.hasRoad) return null;
+
+    // SVG Text Rendering helpers
+    const lineHeight = 14;
+    let currentY = 15;
+    const padding = 8;
+    const boxWidth = 140;
+    
+    const lines: React.ReactNode[] = [];
+
+    // Header (Unit)
+    if (unit) {
+        lines.push(<text key="u-type" x={padding} y={currentY} fill={PLAYER_COLORS[unit.owner]} fontSize={11} fontWeight="bold" textTransform="uppercase">{unit.type}</text>);
+        currentY += lineHeight;
+        lines.push(
+            <g key="u-stats" transform={`translate(${padding}, ${currentY - 4})`}>
+                <text fill="#cbd5e1" fontSize={10}>ATK: <tspan fill="white" fontWeight="bold">{unit.attack}</tspan>  DEF: <tspan fill="white" fontWeight="bold">{unit.defense}</tspan></text>
+            </g>
+        );
+        currentY += lineHeight + 4; // Divider gap
+    }
+
+    // Header (Terrain/Structure)
+    const structName = tile.isHQ ? "Headquarters" : (tile.structure || (tile.isRuins ? "Ruins" : tile.resource));
+    lines.push(<text key="t-name" x={padding} y={currentY} fill="white" fontWeight="bold" fontSize={11}>{structName}</text>);
+    currentY += lineHeight;
+
+    // Defense Bonus
+    const defBonus = TERRAIN_DEFENSE[tile.resource] + (tile.hasWall ? 3 : 0);
+    lines.push(<text key="t-def" x={padding} y={currentY} fill="#94a3b8" fontSize={10}>Def Bonus: +{defBonus}</text>);
+    currentY += lineHeight;
+
+    // Road Info
+    if (tile.hasRoad) {
+        lines.push(<text key="t-road" x={padding} y={currentY} fill="#e2e8f0" fontSize={10}>+ Road</text>);
+        currentY += lineHeight;
+    }
+
+    const boxHeight = currentY + 4;
 
     return (
         <g transform={`translate(${tooltipX}, ${tooltipY})`} className="pointer-events-none z-[100]">
-            <foreignObject width={200} height={150}>
-                <div className="bg-slate-900/95 p-3 rounded-lg border border-slate-600 shadow-2xl text-xs text-white backdrop-blur-sm">
-                    {/* Unit Section */}
-                    {unit && (
-                        <div className="mb-2 pb-2 border-b border-slate-700">
-                             <div className="flex justify-between items-center mb-1">
-                                 <span className={`font-bold uppercase ${PLAYER_COLORS[unit.owner]}`}>{unit.type}</span>
-                                 <div className="flex gap-2">
-                                     <span className="bg-red-900/50 px-1.5 py-0.5 rounded text-red-200 border border-red-800 flex items-center gap-1" title="Attack">
-                                         <Sword size={10} /> {unit.attack}
-                                     </span>
-                                     <span className="bg-blue-900/50 px-1.5 py-0.5 rounded text-blue-200 border border-blue-800 flex items-center gap-1" title="Defense">
-                                         <Shield size={10} /> {unit.defense}
-                                     </span>
-                                 </div>
-                             </div>
-                             {isMyUnit ? (
-                                 <div className="text-slate-400 flex items-center gap-1">
-                                     <Footprints size={12} className="text-green-400" /> Moves: <span className="text-white font-mono">{unit.movesLeft}/{unit.maxMoves}</span>
-                                 </div>
-                             ) : (
-                                 <div className="text-slate-500 italic">Enemy Unit</div>
-                             )}
-                        </div>
-                    )}
-                    
-                    {/* Tile/Structure Section */}
-                    <div>
-                        <div className="font-bold text-slate-300 mb-1">{tile.isHQ ? "Headquarters" : (tile.structure || (tile.isRuins ? "Ancient Ruins" : tile.resource))}</div>
-                        <div className="flex gap-2 text-[10px] text-slate-400">
-                             <span className="flex items-center gap-1"><Shield size={10} /> Def Bonus: +{TERRAIN_DEFENSE[tile.resource] + (tile.hasWall ? 3 : 0)}</span>
-                             {tile.controller && <span className={`uppercase font-bold ${PLAYER_COLORS[tile.controller]}`}>{tile.controller}</span>}
-                        </div>
-                        {tile.isRuins && <div className="text-yellow-400 mt-1 italic animate-pulse">Explore for rewards!</div>}
-                    </div>
-                </div>
-            </foreignObject>
+            {/* Tooltip Background */}
+            <rect width={boxWidth} height={boxHeight} rx={6} fill="#0f172a" stroke="#475569" strokeWidth={1} fillOpacity={0.95} />
+            {lines}
         </g>
     );
 };
@@ -395,7 +412,7 @@ export const HexGrid: React.FC<HexGridProps> = ({ gameState, onTileClick, validM
 
         {/* Floating Text Overlay */}
         {gameState.effects.map(effect => (
-             <text key={effect.id} x={effect.x} y={effect.y} fill={effect.color} textAnchor="middle" fontSize="16" fontWeight="bold" className="animate-float-up pointer-events-none drop-shadow-md" style={{ animation: 'floatUp 2s ease-out forwards' }}>{effect.text}</text>
+             <text key={effect.id} x={effect.x} y={effect.y} fill={effect.color} textAnchor="middle" fontSize={16} fontWeight="bold" className="animate-float-up pointer-events-none drop-shadow-md" style={{ animation: 'floatUp 2s ease-out forwards' }}>{effect.text}</text>
         ))}
         <style>{`@keyframes floatUp { 0% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(-40px); } } .animate-float-up { animation: floatUp 2s ease-out forwards; } .animate-spin-slow { animation: spin 8s linear infinite; } @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
       </svg>
