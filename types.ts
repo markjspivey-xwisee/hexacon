@@ -43,8 +43,9 @@ export interface Unit {
   id: string;
   owner: PlayerColor;
   type: UnitType;
-  power: number; 
-  movesLeft: number; // Changed from hasMoved to support multiple moves
+  attack: number;
+  defense: number; 
+  movesLeft: number; 
   maxMoves: number;
   revealed: boolean; // Stratego: true if it has engaged in combat
 }
@@ -91,8 +92,8 @@ export interface FloatingText {
 }
 
 export interface CombatResult {
-  attacker: { type: UnitType, power: number, owner: PlayerColor };
-  defender: { type: UnitType, power: number, owner: PlayerColor, bonus: number };
+  attacker: { type: UnitType, attack: number, owner: PlayerColor };
+  defender: { type: UnitType, defense: number, owner: PlayerColor, bonus: number };
   outcome: 'WIN' | 'LOSS' | 'DRAW';
   timestamp: number;
 }

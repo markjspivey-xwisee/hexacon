@@ -1,4 +1,3 @@
-
 import { PlayerColor, ResourceType, UnitType, StructureType, TechType } from './types';
 
 export const HEX_SIZE = 40;
@@ -13,7 +12,7 @@ export const FACTION_INFO: Record<PlayerColor, { name: string, description: stri
   [PlayerColor.RED]: {
     name: "The Imperium",
     description: "Conquerors who value strength above all.",
-    bonus: "+1 Power when Attacking"
+    bonus: "+1 Attack Power"
   },
   [PlayerColor.BLUE]: {
     name: "The Cartel",
@@ -32,29 +31,34 @@ export const FACTION_INFO: Record<PlayerColor, { name: string, description: stri
   }
 };
 
-export const UNIT_STATS: Record<UnitType, { power: number; moves: number; cost: Record<ResourceType, number> }> = {
+export const UNIT_STATS: Record<UnitType, { attack: number; defense: number; moves: number; cost: Record<ResourceType, number> }> = {
   [UnitType.SCOUT]: { 
-    power: 2, 
+    attack: 2,
+    defense: 1,
     moves: 2,
     cost: { WOOD: 1, BRICK: 0, WHEAT: 1, ORE: 0, WATER: 0 } 
   },
   [UnitType.SOLDIER]: { 
-    power: 4, 
+    attack: 4,
+    defense: 4,
     moves: 1,
     cost: { WOOD: 1, BRICK: 1, WHEAT: 1, ORE: 0, WATER: 0 } 
   },
   [UnitType.KNIGHT]: { 
-    power: 7, 
+    attack: 7,
+    defense: 6,
     moves: 1,
     cost: { WOOD: 0, BRICK: 2, WHEAT: 2, ORE: 1, WATER: 0 } 
   },
   [UnitType.GENERAL]: { 
-    power: 9, 
+    attack: 9,
+    defense: 9,
     moves: 1,
     cost: { WOOD: 0, BRICK: 0, WHEAT: 3, ORE: 3, WATER: 0 } 
   },
   [UnitType.GALLEY]: { 
-    power: 5, 
+    attack: 5,
+    defense: 3,
     moves: 3,
     cost: { WOOD: 2, BRICK: 0, WHEAT: 1, ORE: 0, WATER: 0 } 
   },
@@ -102,7 +106,7 @@ export const TECH_STATS: Record<TechType, { name: string; cost: Record<ResourceT
   [TechType.METALLURGY]: {
     name: 'Metallurgy',
     cost: { WOOD: 0, BRICK: 0, WHEAT: 0, ORE: 5, WATER: 0 },
-    description: '+1 Power to ALL units'
+    description: '+1 Combat Power to ALL units'
   },
   [TechType.MASONRY]: {
     name: 'Masonry',

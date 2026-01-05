@@ -74,7 +74,7 @@ export const getAIMove = async (gameState: GameState, playerColor: PlayerColor):
   // Prioritize moving strong units that haven't moved yet
   const movableUnits = myUnits
     .filter(u => u.movesLeft > 0)
-    .sort((a, b) => b.power - a.power);
+    .sort((a, b) => b.attack - a.attack);
 
   for (const unit of movableUnits) {
     const unitTile = Object.values(gameState.tiles).find(t => t.unitId === unit.id);
@@ -101,17 +101,17 @@ export const getAIMove = async (gameState: GameState, playerColor: PlayerColor):
         const targetUnit = gameState.units[targetTile.unitId];
         if (targetUnit.owner !== playerColor) {
            const defBonus = (TERRAIN_DEFENSE[targetTile.resource] || 0) + (targetTile.hasWall ? 3 : 0);
-           const estimatedPower = targetUnit.revealed ? targetUnit.power : 4; 
-           const defense = estimatedPower + defBonus;
-           const myPower = unit.power + (hasMetallurgy ? 1 : 0);
+           const estimatedDefense = targetUnit.revealed ? targetUnit.defense : 3; // Estimate low def if unknown
+           const defense = estimatedDefense + defBonus;
+           const myAttack = unit.attack + (hasMetallurgy ? 1 : 0);
            
-           if (myPower > defense) {
-             score = 100 + (targetUnit.power * 10);
+           if (myAttack > defense) {
+             score = 100 + (targetUnit.attack * 10);
              if (targetTile.isHQ) score += 500;
              if (targetTile.structure === StructureType.MONOLITH) score += 400;
              if (targetTile.structure === StructureType.WONDER) score += 1000;
-           } else if (myPower === defense) {
-             score = myPower < 4 ? 20 : -20; 
+           } else if (myAttack === defense) {
+             score = myAttack < 4 ? 20 : -20; 
            } else {
              score = -500;
            }
@@ -140,9 +140,9 @@ export const getAIMove = async (gameState: GameState, playerColor: PlayerColor):
               const tnId = getHexId(tn.q, tn.r, tn.s);
               const neighborUnit = gameState.units[gameState.tiles[tnId]?.unitId || ''];
               if (neighborUnit && neighborUnit.owner !== playerColor) {
-                  const myPower = unit.power + (hasMetallurgy ? 1 : 0);
-                  if (neighborUnit.power > myPower) threatPenalty += 60; 
-                  else if (neighborUnit.power === myPower) threatPenalty += 10;
+                  const myDefense = unit.defense + (hasMetallurgy ? 1 : 0);
+                  if (neighborUnit.attack > myDefense) threatPenalty += 60; 
+                  else if (neighborUnit.attack === myDefense) threatPenalty += 10;
               }
           }
           score -= threatPenalty;

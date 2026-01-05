@@ -82,10 +82,12 @@ export const createOnlineGame = async (initialState: GameState, hostPlayerId: st
   const matchId = Math.random().toString(36).substring(2, 8).toUpperCase();
   const matchRef = doc(db, "matches", matchId);
 
-  // Host is always RED
+  // Host is always the first player in the initial state list, ensuring they get their chosen color
+  const hostColor = initialState.players[0].color;
+
   const matchData: MatchData = {
     gameState: { ...initialState, matchId },
-    playerIds: { [hostPlayerId]: PlayerColor.RED },
+    playerIds: { [hostPlayerId]: hostColor },
     createdAt: Date.now()
   };
 
@@ -124,9 +126,9 @@ export const joinOnlineGame = async (matchId: string, playerId: string): Promise
 
     // 2. Find open slot
     const occupiedColors = Object.values(data.playerIds);
-    const allColors = [PlayerColor.RED, PlayerColor.BLUE, PlayerColor.GREEN, PlayerColor.YELLOW];
-    const maxPlayers = data.gameState.players.length;
-    const availableColors = allColors.slice(0, maxPlayers).filter(c => !occupiedColors.includes(c));
+    // Get all potential player colors from the game state definition to ensure we match the host's setup
+    const allColors = data.gameState.players.map(p => p.color);
+    const availableColors = allColors.filter(c => !occupiedColors.includes(c));
 
     if (availableColors.length === 0) {
         return { success: false, color: null, msg: "Game is full" };

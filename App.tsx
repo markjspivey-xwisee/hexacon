@@ -3,7 +3,7 @@ import { useGameEngine } from './hooks/useGameEngine';
 import { HexGrid } from './components/HexGrid';
 import { GameUI } from './components/GameUI';
 import { UnitType, PlayerColor, Tile, Player, StructureType, Unit, MapType } from './types';
-import { Sword, Users, Monitor, Info, Globe, Play, Cloud, RotateCcw, AlertTriangle, Loader2, X, ClipboardCopy, Link as LinkIcon, Share2, Menu, LogIn, Key, BarChart3, Trophy, Skull, HelpCircle, Settings, Bot, Map, ShieldAlert } from 'lucide-react';
+import { Sword, Users, Monitor, Info, Globe, Play, Cloud, RotateCcw, AlertTriangle, Loader2, X, ClipboardCopy, Link as LinkIcon, Share2, Menu, LogIn, Key, BarChart3, Trophy, Skull, HelpCircle, Settings, Bot, Map, ShieldAlert, Check, Footprints, Shield, Compass, Axe, Crown, Ship, User } from 'lucide-react';
 import { getNeighbors, getHexId } from './utils/hexUtils';
 import { PLAYER_BG_COLORS, PLAYER_COLORS, FACTION_INFO } from './constants';
 
@@ -27,19 +27,18 @@ const App: React.FC = () => {
 
   const [buildItem, setBuildItem] = useState<{ id: string, category: 'UNIT' | 'STRUCTURE' } | null>(null);
   const [joinId, setJoinId] = useState("");
-  const [joinError, setJoinError] = useState("");
   const [showConfig, setShowConfig] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showSyncModal, setShowSyncModal] = useState(false);
   const [showStatsModal, setShowStatsModal] = useState(false);
   const [showInstructions, setShowInstructions] = useState(false);
-  const [showHotseatOverlay, setShowHotseatOverlay] = useState(false);
   const [passcodeInput, setPasscodeInput] = useState("");
   const [copySuccess, setCopySuccess] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 1024);
   const [playerCount, setPlayerCount] = useState(2);
   const [mapType, setMapType] = useState<MapType>(MapType.PANGAEA);
+  const [selectedFaction, setSelectedFaction] = useState<PlayerColor>(PlayerColor.RED);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 1024);
@@ -59,17 +58,6 @@ const App: React.FC = () => {
         localStorage.setItem('hexacon_visited', 'true');
     }
   }, []);
-
-  // Hotseat Transition Effect: Only show if offline, not setup, later turn, and NOT AI turn.
-  useEffect(() => {
-    if (!isOnline && !setupMode && gameState.turn > 1) {
-        const currentPlayer = gameState.players[gameState.currentPlayerIndex];
-        // If it's an AI player (or spectator mode), do NOT show the hotseat overlay.
-        if (!currentPlayer.isAI && !isSpectatorMode) {
-             setShowHotseatOverlay(true);
-        }
-    }
-  }, [gameState.currentPlayerIndex, isOnline, setupMode, gameState.turn, gameState.players, isSpectatorMode]);
 
   const { validMoves, validAttacks } = useMemo(() => {
     const moves: string[] = [];
@@ -92,7 +80,8 @@ const App: React.FC = () => {
   }, [gameState.selectedHexId, gameState.tiles, gameState.units, buildItem]);
 
   const handleBuildSelect = (id: string, category: 'UNIT' | 'STRUCTURE') => {
-    setBuildItem({ id, category });
+    // Allow toggle/deselect
+    setBuildItem(prev => (prev?.id === id ? null : { id, category }));
   };
 
   const handleTileClick = (hexId: string) => {
@@ -163,6 +152,19 @@ const App: React.FC = () => {
           return acc + amt;
       }, 0);
       return { tileCount: tiles.length, unitCount: units.length, income };
+  };
+
+  // Helper for Unit Card Icon
+  const getUnitIcon = (type: UnitType) => {
+      const props = { size: 32, className: "text-white" };
+      switch(type) {
+          case UnitType.SCOUT: return <Compass {...props} />;
+          case UnitType.SOLDIER: return <User {...props} />;
+          case UnitType.KNIGHT: return <Axe {...props} />;
+          case UnitType.GENERAL: return <Crown {...props} />;
+          case UnitType.GALLEY: return <Ship {...props} />;
+          default: return <User {...props} />;
+      }
   };
 
   if (setupMode) {
@@ -285,7 +287,7 @@ const App: React.FC = () => {
             </div>
         )}
 
-        <div className="max-w-md w-full space-y-6 text-center">
+        <div className="max-w-xl w-full space-y-6 text-center">
             <div className="space-y-2">
                 <div className="p-6 bg-indigo-600 rounded-3xl shadow-2xl inline-block mb-2">
                     <Sword size={48} className="text-white" />
@@ -294,37 +296,67 @@ const App: React.FC = () => {
             </div>
 
             <div className="bg-slate-800/50 p-4 rounded-2xl border border-slate-700/50 backdrop-blur-sm">
-                <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-3">World Setup</p>
-                <div className="flex justify-center gap-3 mb-4">
-                    {[2, 3, 4].map(num => (
-                        <button
-                            key={num}
-                            onClick={() => setPlayerCount(num)}
-                            className={`w-16 h-12 rounded-xl font-black text-lg border-2 transition-all flex items-center justify-center gap-2
-                                ${playerCount === num 
-                                    ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg shadow-indigo-900/50 scale-105' 
-                                    : 'bg-slate-800 border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300'}`}
-                        >
-                            {num} <Users size={14} className={playerCount === num ? "opacity-100" : "opacity-50"} />
-                        </button>
-                    ))}
+                <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-3">Choose Your Faction</p>
+                <div className="grid grid-cols-2 gap-2 mb-4">
+                    {Object.entries(FACTION_INFO).map(([color, info]) => {
+                        const isSelected = selectedFaction === color;
+                        return (
+                            <button
+                                key={color}
+                                onClick={() => setSelectedFaction(color as PlayerColor)}
+                                className={`relative p-3 rounded-lg border-2 text-left transition-all group overflow-hidden
+                                    ${isSelected 
+                                        ? `border-white ${PLAYER_BG_COLORS[color as PlayerColor]} shadow-lg scale-[1.02]` 
+                                        : 'bg-slate-900 border-slate-800 hover:border-slate-600 opacity-80 hover:opacity-100'}`}
+                            >
+                                <div className="flex justify-between items-start">
+                                    <span className={`font-black uppercase text-xs ${isSelected ? 'text-white' : 'text-slate-300'}`}>{info.name}</span>
+                                    {isSelected && <Check size={14} className="text-white" />}
+                                </div>
+                                <div className={`text-[10px] mt-1 font-bold ${isSelected ? 'text-white/90' : 'text-slate-500'}`}>{info.bonus}</div>
+                            </button>
+                        );
+                    })}
                 </div>
-                <div className="flex justify-center gap-2">
-                    {Object.values(MapType).map(t => (
-                        <button 
-                            key={t}
-                            onClick={() => setMapType(t)}
-                            className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all
-                                ${mapType === t ? 'bg-indigo-900/50 border-indigo-400 text-white' : 'bg-slate-900 border-slate-800 text-slate-500'}`}
-                        >
-                            {t}
-                        </button>
-                    ))}
+
+                <div className="flex flex-col md:flex-row gap-4 items-stretch justify-between">
+                    <div className="flex-1">
+                        <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-2">Players</p>
+                        <div className="flex justify-center gap-2">
+                            {[2, 3, 4].map(num => (
+                                <button
+                                    key={num}
+                                    onClick={() => setPlayerCount(num)}
+                                    className={`w-10 h-10 rounded-lg font-black text-sm border transition-all flex items-center justify-center
+                                        ${playerCount === num 
+                                            ? 'bg-white text-slate-900 border-white' 
+                                            : 'bg-slate-800 border-slate-700 text-slate-500 hover:border-slate-500'}`}
+                                >
+                                    {num}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="flex-1">
+                        <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-2">Map Type</p>
+                        <div className="flex justify-center gap-1">
+                            {Object.values(MapType).map(t => (
+                                <button 
+                                    key={t}
+                                    onClick={() => setMapType(t)}
+                                    className={`px-2 py-2 rounded-lg text-[10px] font-bold border transition-all
+                                        ${mapType === t ? 'bg-white text-slate-900 border-white' : 'bg-slate-900 border-slate-800 text-slate-500'}`}
+                                >
+                                    {t}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
                 </div>
             </div>
 
             <div className="grid grid-cols-1 gap-4">
-                <button onClick={() => startGame(playerCount, mapType)} className="flex items-center p-5 bg-slate-800 border border-slate-700 hover:border-indigo-500 rounded-2xl transition-all group shadow-lg">
+                <button onClick={() => startGame(playerCount, mapType, selectedFaction)} className="flex items-center p-5 bg-slate-800 border border-slate-700 hover:border-indigo-500 rounded-2xl transition-all group shadow-lg">
                     <Monitor className="text-indigo-400 mr-4 group-hover:scale-110 transition-transform" size={28} />
                     <div className="text-left"><span className="block font-bold">vs AI Advisor</span><span className="text-xs text-slate-500">Single Player ({playerCount}P)</span></div>
                 </button>
@@ -346,7 +378,7 @@ const App: React.FC = () => {
                         <button onClick={() => setShowConfig(true)} className="p-2 text-slate-500 hover:text-white" title="Firebase Settings"><Settings size={18} /></button>
                     </div>
                     {savedMatchId && <button onClick={resumeLastGame} className="w-full py-3 mb-3 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-colors"><RotateCcw size={18} /> Resume Game</button>}
-                    <button onClick={() => startOnlineGame(playerCount, mapType)} disabled={isCreatingGame} className="w-full py-3 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold mb-3 flex items-center justify-center gap-2 transition-colors">
+                    <button onClick={() => startOnlineGame(playerCount, mapType, selectedFaction)} disabled={isCreatingGame} className="w-full py-3 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold mb-3 flex items-center justify-center gap-2 transition-colors">
                         {isCreatingGame ? <Loader2 className="animate-spin" /> : <Cloud />} {isCreatingGame ? "Creating..." : `Start ${playerCount}P Match`}
                     </button>
                     <div className="flex gap-2">
@@ -373,6 +405,9 @@ const App: React.FC = () => {
   
   // Combat Overlay Rendering
   const combat = gameState.combatResult;
+
+  // Selected Unit Logic for Unit Card
+  const selectedUnit = gameState.selectedHexId ? gameState.units[gameState.tiles[gameState.selectedHexId]?.unitId || ''] : null;
 
   return (
     <div className="flex h-screen bg-slate-950 overflow-hidden flex-col lg:flex-row relative">
@@ -418,25 +453,59 @@ const App: React.FC = () => {
           </div>
       )}
 
-      {/* Hotseat Curtain */}
-      {showHotseatOverlay && (
-          <div className="fixed inset-0 z-[200] bg-slate-950 flex items-center justify-center flex-col p-6 animate-in fade-in duration-300">
-               <h2 className="text-slate-400 uppercase tracking-widest font-bold mb-4">Turn Change</h2>
-               <div className={`text-6xl font-black mb-8 ${PLAYER_COLORS[currentPlayer.color]} drop-shadow-lg`}>
-                   {currentPlayer.color}'s TURN
-               </div>
-               <div className="flex flex-col items-center mb-8">
-                    <span className="text-xl font-bold text-white mb-1">{FACTION_INFO[currentPlayer.color].name}</span>
-                    <span className="text-sm text-slate-500">{FACTION_INFO[currentPlayer.color].bonus}</span>
-               </div>
-               <p className="text-slate-400 mb-8 max-w-xs text-center">Pass the device to {currentPlayer.color}. Don't look at the screen until you are the active player!</p>
-               <button 
-                  onClick={() => setShowHotseatOverlay(false)}
-                  className={`px-12 py-6 rounded-2xl text-2xl font-bold text-white shadow-2xl transition-transform hover:scale-105 active:scale-95 ${PLAYER_BG_COLORS[currentPlayer.color]}`}
-               >
-                   I am Ready
-               </button>
-          </div>
+      {/* Selected Unit Details Card */}
+      {selectedUnit && (
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[100] animate-in slide-in-from-bottom-6 duration-300">
+             <div className="bg-slate-900/90 backdrop-blur-md border-2 border-slate-600 rounded-2xl p-4 shadow-2xl flex items-center gap-6 min-w-[320px]">
+                  
+                  {/* Icon & Identity */}
+                  <div className={`w-16 h-16 rounded-full ${PLAYER_BG_COLORS[selectedUnit.owner]} flex items-center justify-center border-4 border-white shadow-lg`}>
+                       {getUnitIcon(selectedUnit.type)}
+                  </div>
+
+                  <div className="flex-1">
+                      <div className="flex justify-between items-start mb-2">
+                          <div>
+                              <h3 className="text-xl font-black text-white uppercase leading-none">{selectedUnit.type}</h3>
+                              <p className={`text-xs font-bold ${PLAYER_COLORS[selectedUnit.owner]} uppercase opacity-90`}>{selectedUnit.owner} Faction</p>
+                          </div>
+                      </div>
+
+                      {/* Stats Grid */}
+                      <div className="flex gap-4">
+                           {/* Attack */}
+                           <div className="flex flex-col items-center bg-red-900/40 p-2 rounded-lg border border-red-500/30 min-w-[60px]">
+                               <Sword size={16} className="text-red-400 mb-1" />
+                               <span className="text-lg font-black text-white">{selectedUnit.attack}</span>
+                               <span className="text-[9px] text-red-200 uppercase font-bold">ATK</span>
+                           </div>
+
+                           {/* Defense */}
+                           <div className="flex flex-col items-center bg-blue-900/40 p-2 rounded-lg border border-blue-500/30 min-w-[60px]">
+                               <Shield size={16} className="text-blue-400 mb-1" />
+                               <span className="text-lg font-black text-white">{selectedUnit.defense}</span>
+                               <span className="text-[9px] text-blue-200 uppercase font-bold">DEF</span>
+                           </div>
+
+                           {/* Movement */}
+                           <div className="flex flex-col items-center bg-green-900/40 p-2 rounded-lg border border-green-500/30 min-w-[80px] flex-1">
+                               <div className="flex items-center gap-2 mb-1">
+                                   <Footprints size={16} className="text-green-400" />
+                                   <span className="text-lg font-black text-white">{selectedUnit.movesLeft}<span className="text-sm text-green-300/50">/{selectedUnit.maxMoves}</span></span>
+                               </div>
+                               
+                               {/* Mini Progress Bar for Movement */}
+                               <div className="w-full h-1.5 bg-green-950 rounded-full overflow-hidden">
+                                   <div 
+                                        className="h-full bg-green-500 transition-all duration-500" 
+                                        style={{ width: `${(selectedUnit.movesLeft / selectedUnit.maxMoves) * 100}%`}}
+                                   />
+                               </div>
+                           </div>
+                      </div>
+                  </div>
+             </div>
+        </div>
       )}
 
       {/* Modals */}
@@ -579,6 +648,7 @@ const App: React.FC = () => {
                 onShowStats={() => {setShowStatsModal(true)}}
                 isMobile={isMobile}
                 localPlayerColor={localPlayerColor}
+                selectedAction={buildItem}
             />
         </div>
       </div>

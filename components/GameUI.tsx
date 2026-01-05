@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { GameState, UnitType, StructureType, ResourceType, PlayerColor, Tile, Unit, Player, TechType } from '../types';
 import { RESOURCES, UNIT_STATS, STRUCTURE_STATS, PLAYER_BG_COLORS, PLAYER_COLORS, RESOURCE_COLORS, TERRAIN_DEFENSE, TECH_STATS, WONDER_VICTORY_TURNS } from '../constants';
-import { Shield, Sword, Axe, Crown, History, SkipForward, Copy, Check, Lightbulb, TrendingUp, Footprints, Eye, Hammer, Home, Construction, BrickWall, ChevronDown, ChevronUp, BarChart3, Lock, Loader2, ArrowRightLeft, Store, X, Volume2, VolumeX, BookOpen, Star, Anchor } from 'lucide-react';
+import { Shield, Sword, Axe, Crown, History, SkipForward, Copy, Check, Lightbulb, TrendingUp, Footprints, Eye, Hammer, Home, Construction, BrickWall, ChevronDown, ChevronUp, BarChart3, Lock, Loader2, ArrowRightLeft, Store, X, Volume2, VolumeX, BookOpen, Star, Anchor, Trees, Mountain, Wheat, Droplets, Compass, Ship, User, Gem, Milestone, Building2 } from 'lucide-react';
 import { toggleMute, getMuteState } from '../utils/soundUtils';
 
 interface GameUIProps {
@@ -11,17 +11,45 @@ interface GameUIProps {
   onTrade: (give: ResourceType, get: ResourceType) => void;
   onShare: () => void;
   onShowStats: () => void;
-  onResearch?: (tech: TechType) => void; // New prop
+  onResearch?: (tech: TechType) => void; 
   isMobile?: boolean;
   localPlayerColor: PlayerColor | null;
+  selectedAction?: { id: string, category: 'UNIT' | 'STRUCTURE' } | null;
 }
 
+const getIconForType = (type: string) => {
+    switch (type) {
+        case UnitType.SCOUT: return <Compass size={18} />;
+        case UnitType.SOLDIER: return <User size={18} />;
+        case UnitType.KNIGHT: return <Axe size={18} />;
+        case UnitType.GENERAL: return <Crown size={18} />;
+        case UnitType.GALLEY: return <Ship size={18} />;
+        case StructureType.SETTLEMENT: return <Home size={18} />;
+        case StructureType.CITY: return <Building2 size={18} />; 
+        case StructureType.WALL: return <BrickWall size={18} />;
+        case StructureType.ROAD: return <Milestone size={18} />;
+        case StructureType.PORT: return <Anchor size={18} />;
+        case StructureType.WONDER: return <Star size={18} />;
+        default: return <Hammer size={18} />;
+    }
+};
+
 const ResourceBadge: React.FC<{ type: ResourceType; count: number; income: number }> = ({ type, count, income }) => {
-  const icons = { WOOD: '🌲', BRICK: '🧱', WHEAT: '🌾', ORE: '⛰️', WATER: '💧' };
+  const Icon = () => {
+      switch(type) {
+          case 'WOOD': return <Trees size={20} className="text-green-400" />;
+          case 'BRICK': return <BrickWall size={20} className="text-red-400" />;
+          case 'WHEAT': return <Wheat size={20} className="text-yellow-400" />;
+          case 'ORE': return <Mountain size={20} className="text-slate-400" />;
+          case 'WATER': return <Droplets size={20} className="text-blue-400" />;
+          default: return null;
+      }
+  };
+
   return (
     <div className="flex flex-col bg-slate-800 px-3 py-2 rounded border border-slate-700 relative overflow-hidden group min-h-[54px] justify-center">
       <div className="flex justify-between items-center z-10">
-        <span className="text-xl mr-1">{icons[type as keyof typeof icons]}</span>
+        <div className="mr-1"><Icon /></div>
         <span className="font-bold text-white text-lg">{count}</span>
       </div>
       <div className="flex justify-between items-center mt-0.5">
@@ -49,7 +77,7 @@ const TechIcon: React.FC<{ type: TechType }> = ({ type }) => {
     }
 };
 
-export const GameUI: React.FC<GameUIProps> = ({ gameState, onEndTurn, onBuild, onTrade, onShare, onShowStats, onResearch, isMobile, localPlayerColor }) => {
+export const GameUI: React.FC<GameUIProps> = ({ gameState, onEndTurn, onBuild, onTrade, onShare, onShowStats, onResearch, isMobile, localPlayerColor, selectedAction }) => {
   const currentPlayer = gameState.players[gameState.currentPlayerIndex];
   
   const isOnline = !!localPlayerColor;
@@ -341,6 +369,7 @@ export const GameUI: React.FC<GameUIProps> = ({ gameState, onEndTurn, onBuild, o
                             if (!hasSeafaring) { isRestricted = true; navalReason = "Requires Seafaring"; }
                         }
 
+                        const isSelected = selectedAction?.id === type;
                         // Disable logic
                         const disabled = !canAfford || (isWonder && hasWonder) || isRestricted;
 
@@ -349,13 +378,17 @@ export const GameUI: React.FC<GameUIProps> = ({ gameState, onEndTurn, onBuild, o
                                 key={type} disabled={disabled} onClick={() => onBuild(type, buildTab === 'UNITS' ? 'UNIT' : 'STRUCTURE')}
                                 className={`flex flex-col p-3 rounded-xl border transition-all text-left relative min-h-[64px]
                                     ${disabled ? 'bg-slate-900/50 opacity-40 cursor-not-allowed' : 'bg-slate-800 border-slate-600 active:scale-[0.98]'}
-                                    ${isWonder ? 'border-yellow-500/50 bg-yellow-900/10' : ''}`}
+                                    ${isWonder ? 'border-yellow-500/50 bg-yellow-900/10' : ''}
+                                    ${isSelected ? 'ring-2 ring-indigo-400 bg-indigo-900/30 border-indigo-500' : ''}`}
                             >
                                 <div className="flex justify-between items-center w-full z-10">
-                                    <span className={`font-bold text-sm ${isWonder ? 'text-yellow-400' : ''}`}>{stats.name || type}</span>
+                                    <span className={`font-bold text-sm flex items-center gap-2 ${isWonder ? 'text-yellow-400' : ''} ${isSelected ? 'text-indigo-200' : ''}`}>
+                                        <div className={isSelected ? 'text-indigo-300' : 'text-slate-400'}>{getIconForType(type)}</div>
+                                        {stats.name || type}
+                                    </span>
                                     {buildTab === 'UNITS' && <div className="flex gap-2 text-[10px] bg-slate-700 px-1.5 py-0.5 rounded">
                                         <span className="flex items-center gap-0.5"><Footprints size={10} /> {stats.moves}</span>
-                                        <span className="flex items-center gap-0.5"><Sword size={10} /> {stats.power}</span>
+                                        <span className="flex items-center gap-0.5"><Sword size={10} /> {stats.attack || stats.power}</span>
                                     </div>}
                                 </div>
                                 <div className="flex justify-between items-center mt-2">
@@ -364,6 +397,7 @@ export const GameUI: React.FC<GameUIProps> = ({ gameState, onEndTurn, onBuild, o
                                     </div>
                                     {/* Show naval restriction reason */}
                                     {isRestricted && <span className="text-[10px] text-red-400 font-bold">{navalReason}</span>}
+                                    {isSelected && <span className="text-[10px] text-indigo-400 font-bold animate-pulse">SELECTED</span>}
                                 </div>
                             </button>
                         )
