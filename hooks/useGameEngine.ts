@@ -125,6 +125,7 @@ const createInitialState = (numPlayers: number, mapType: MapType = MapType.PANGA
       tiles[hqId].controller = p.color;
       tiles[hqId].isHQ = true;
       tiles[hqId].structure = StructureType.SETTLEMENT;
+      tiles[hqId].hasRoad = true; // HQ acts as a road hub
     }
   });
   
