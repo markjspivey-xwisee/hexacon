@@ -18,7 +18,9 @@ export enum UnitType {
   SOLDIER = 'SOLDIER', // Standard
   KNIGHT = 'KNIGHT', // Strong, expensive
   GENERAL = 'GENERAL', // Strongest
-  GALLEY = 'GALLEY' // Naval unit
+  GALLEY = 'GALLEY', // Naval unit
+  SPY = 'SPY', // New: Revelas info, dies on attack
+  DECOY = 'DECOY' // New: Looks like a unit, dies instantly
 }
 
 export enum StructureType {
@@ -94,8 +96,14 @@ export interface FloatingText {
 export interface CombatResult {
   attacker: { type: UnitType, attack: number, owner: PlayerColor };
   defender: { type: UnitType, defense: number, owner: PlayerColor, bonus: number };
-  outcome: 'WIN' | 'LOSS' | 'DRAW';
+  outcome: 'WIN' | 'LOSS' | 'DRAW' | 'REVEAL';
   timestamp: number;
+  tileId: string; // Used for shake effect location
+}
+
+export interface HistoryPoint {
+  turn: number;
+  playerStats: Record<PlayerColor, { military: number, economy: number }>;
 }
 
 export interface GameState {
@@ -115,6 +123,8 @@ export interface GameState {
   wonderBuiltAt?: number; // Turn number when Wonder was finished
   wonderOwner?: PlayerColor; // Who built it
   combatResult?: CombatResult | null; // Trigger for cinematic
+  history: HistoryPoint[]; // For end game graph
+  aiTaunt?: { text: string, speaker: PlayerColor } | null; // Gemini personality
 }
 
 export interface AIAction {

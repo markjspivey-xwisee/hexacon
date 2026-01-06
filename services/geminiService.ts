@@ -1,6 +1,43 @@
 import { GameState, AIAction, PlayerColor, UnitType, StructureType, TechType } from '../types';
-import { UNIT_STATS, STRUCTURE_STATS, TERRAIN_DEFENSE, RESOURCES, TECH_STATS } from '../constants';
+import { UNIT_STATS, STRUCTURE_STATS, TERRAIN_DEFENSE, RESOURCES, TECH_STATS, FACTION_INFO } from '../constants';
 import { getNeighbors, getHexId, dist } from '../utils/hexUtils';
+import { GoogleGenAI } from "@google/genai";
+
+// Cache client if possible, though env might change
+let genAIClient: GoogleGenAI | null = null;
+
+const getClient = (apiKey: string) => {
+    if (!genAIClient && apiKey && apiKey.startsWith("AIza")) {
+        genAIClient = new GoogleGenAI({ apiKey });
+    }
+    return genAIClient;
+};
+
+export const getAIPersonalityMessage = async (gameState: GameState, playerColor: PlayerColor, eventType: 'VICTORY' | 'DEFEAT' | 'EXPANSION', apiKey: string): Promise<string> => {
+    try {
+        const client = getClient(apiKey);
+        if (!client) return "";
+
+        const faction = FACTION_INFO[playerColor];
+        const prompt = `You are playing a game of Hexacon. You are the ${faction.name} (${playerColor}). 
+        Your personality is: ${faction.description}.
+        
+        The current turn is ${gameState.turn}.
+        Event: ${eventType === 'VICTORY' ? 'You just won a battle' : eventType === 'DEFEAT' ? 'You just lost a battle' : 'You built a city'}.
+        
+        Write a very short (max 10 words), aggressive or boastful taunt to your opponents. Do not use quotes.`;
+
+        const response = await client.models.generateContent({
+            model: 'gemini-2.0-flash-exp', // Fast model for chat
+            contents: prompt,
+        });
+        
+        return response.text.trim();
+    } catch (e) {
+        console.warn("Gemini Chat Error", e);
+        return "";
+    }
+};
 
 /**
  * Heuristic AI Engine - Enhanced

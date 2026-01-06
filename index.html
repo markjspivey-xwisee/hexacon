@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Hexacon</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap" rel="stylesheet">
     <script>
       // Polyfill process for browser environments to prevent crashes when accessing process.env
       if (typeof process === "undefined") {
@@ -13,12 +13,48 @@
       }
     </script>
     <style>
-      body { font-family: 'Inter', sans-serif; background-color: #1e293b; color: #f8fafc; }
-      /* Custom scrollbar for better aesthetics */
-      ::-webkit-scrollbar { width: 8px; }
+      body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #f8fafc; overflow: hidden; }
+      
+      /* Custom scrollbar */
+      ::-webkit-scrollbar { width: 6px; }
       ::-webkit-scrollbar-track { background: #0f172a; }
       ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
       ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+      /* Animations */
+      @keyframes shake {
+        0% { transform: translate(1px, 1px) rotate(0deg); }
+        10% { transform: translate(-1px, -2px) rotate(-1deg); }
+        20% { transform: translate(-3px, 0px) rotate(1deg); }
+        30% { transform: translate(3px, 2px) rotate(0deg); }
+        40% { transform: translate(1px, -1px) rotate(1deg); }
+        50% { transform: translate(-1px, 2px) rotate(-1deg); }
+        60% { transform: translate(-3px, 1px) rotate(0deg); }
+        70% { transform: translate(3px, 1px) rotate(-1deg); }
+        80% { transform: translate(-1px, -1px) rotate(1deg); }
+        90% { transform: translate(1px, 2px) rotate(0deg); }
+        100% { transform: translate(1px, -2px) rotate(-1deg); }
+      }
+      .shake-animation {
+        animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
+      }
+
+      @keyframes wave {
+        0% { transform: translateX(0) translateY(0); }
+        50% { transform: translateX(-5px) translateY(-2px); }
+        100% { transform: translateX(0) translateY(0); }
+      }
+      .water-anim {
+        animation: wave 4s ease-in-out infinite;
+      }
+
+      @keyframes drift {
+        0% { transform: translate(0, 0); }
+        100% { transform: translate(-20px, -20px); }
+      }
+      .fog-drift {
+        animation: drift 20s linear infinite;
+      }
     </style>
   <script type="importmap">
 {

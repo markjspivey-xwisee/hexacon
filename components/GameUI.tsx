@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { GameState, UnitType, StructureType, ResourceType, PlayerColor, Tile, Unit, Player, TechType } from '../types';
 import { RESOURCES, UNIT_STATS, STRUCTURE_STATS, PLAYER_BG_COLORS, PLAYER_COLORS, RESOURCE_COLORS, TERRAIN_DEFENSE, TECH_STATS, WONDER_VICTORY_TURNS } from '../constants';
-import { Shield, Sword, Axe, Crown, History, SkipForward, Copy, Check, Lightbulb, TrendingUp, Footprints, Eye, Hammer, Home, Construction, BrickWall, ChevronDown, ChevronUp, BarChart3, Lock, Loader2, ArrowRightLeft, Store, X, Volume2, VolumeX, BookOpen, Star, Anchor, Trees, Mountain, Wheat, Droplets, Compass, Ship, User, Gem, Milestone, Building2 } from 'lucide-react';
+import { Shield, Sword, Axe, Crown, History, SkipForward, Copy, Check, Lightbulb, TrendingUp, Footprints, Eye, Hammer, Home, Construction, BrickWall, ChevronDown, ChevronUp, BarChart3, Lock, Loader2, ArrowRightLeft, Store, X, Volume2, VolumeX, BookOpen, Star, Anchor, Trees, Mountain, Wheat, Droplets, Compass, Ship, User, Gem, Milestone, Building2, UserX, MessageCircle } from 'lucide-react';
 import { toggleMute, getMuteState } from '../utils/soundUtils';
 
 interface GameUIProps {
@@ -24,6 +24,8 @@ const getIconForType = (type: string) => {
         case UnitType.KNIGHT: return <Axe size={18} />;
         case UnitType.GENERAL: return <Crown size={18} />;
         case UnitType.GALLEY: return <Ship size={18} />;
+        case UnitType.SPY: return <Eye size={18} />;
+        case UnitType.DECOY: return <UserX size={18} />;
         case StructureType.SETTLEMENT: return <Home size={18} />;
         case StructureType.CITY: return <Building2 size={18} />; 
         case StructureType.WALL: return <BrickWall size={18} />;
@@ -296,6 +298,17 @@ export const GameUI: React.FC<GameUIProps> = ({ gameState, onEndTurn, onBuild, o
            </div>
       )}
 
+      {/* AI Chat Bubble */}
+      {gameState.aiTaunt && (
+          <div className="bg-slate-800 border-l-4 border-indigo-500 p-3 rounded-r-lg shadow-lg flex items-start gap-3 animate-in slide-in-from-left duration-300">
+               <div className="bg-indigo-900/50 p-2 rounded-full"><MessageCircle size={16} className="text-indigo-400" /></div>
+               <div>
+                   <span className={`text-[10px] font-bold uppercase ${PLAYER_COLORS[gameState.aiTaunt.speaker]}`}>{gameState.aiTaunt.speaker} says:</span>
+                   <p className="text-xs text-white italic">"{gameState.aiTaunt.text}"</p>
+               </div>
+          </div>
+      )}
+
       {(!isAI || isOnline) && (
         <div className={`flex-1 flex flex-col min-h-0 space-y-2 transition-opacity duration-200 ${(!isMyTurn && isOnline) ? 'opacity-50 pointer-events-none' : ''}`}>
             <div className="flex justify-between items-center">
@@ -398,6 +411,7 @@ export const GameUI: React.FC<GameUIProps> = ({ gameState, onEndTurn, onBuild, o
                                     {/* Show naval restriction reason */}
                                     {isRestricted && <span className="text-[10px] text-red-400 font-bold">{navalReason}</span>}
                                     {isSelected && <span className="text-[10px] text-indigo-400 font-bold animate-pulse">SELECTED</span>}
+                                    {stats.description && !isRestricted && <span className="text-[9px] text-slate-500 ml-auto italic">{stats.description}</span>}
                                 </div>
                             </button>
                         )

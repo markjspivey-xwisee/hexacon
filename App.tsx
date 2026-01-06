@@ -3,9 +3,9 @@ import { useGameEngine } from './hooks/useGameEngine';
 import { HexGrid } from './components/HexGrid';
 import { GameUI } from './components/GameUI';
 import { UnitType, PlayerColor, Tile, Player, StructureType, Unit, MapType } from './types';
-import { Sword, Users, Monitor, Info, Globe, Play, Cloud, RotateCcw, AlertTriangle, Loader2, X, ClipboardCopy, Link as LinkIcon, Share2, Menu, LogIn, Key, BarChart3, Trophy, Skull, HelpCircle, Settings, Bot, Map, ShieldAlert, Check, Footprints, Shield, Compass, Axe, Crown, Ship, User } from 'lucide-react';
+import { Sword, Users, Monitor, Info, Globe, Play, Cloud, RotateCcw, AlertTriangle, Loader2, X, ClipboardCopy, Link as LinkIcon, Share2, Menu, LogIn, Key, BarChart3, Trophy, Skull, HelpCircle, Settings, Bot, Map, ShieldAlert, Check, Footprints, Shield, Compass, Axe, Crown, Ship, User, Trees, Mountain, Wheat, Droplets, BrickWall, Home, Building2, Anchor, Star, Gem, Milestone } from 'lucide-react';
 import { getNeighbors, getHexId } from './utils/hexUtils';
-import { PLAYER_BG_COLORS, PLAYER_COLORS, FACTION_INFO } from './constants';
+import { PLAYER_BG_COLORS, PLAYER_COLORS, FACTION_INFO, TERRAIN_DEFENSE, STRUCTURE_STATS, TERRAIN_TYPE } from './constants';
 
 const DEFAULT_CONFIG_TEMPLATE = JSON.stringify({
   apiKey: "AIzaSyDXQ5E9E-rcXYauP9o72AJ_OFAxzpt6mZE",
@@ -94,23 +94,20 @@ const App: React.FC = () => {
       return;
     }
     if (!gameState.selectedHexId) {
-      const tile = gameState.tiles[hexId];
-      const unit = tile?.unitId ? gameState.units[tile.unitId] : null;
-      if (unit) {
-        const isMyUnit = isOnline ? unit.owner === localPlayerColor : unit.owner === gameState.players[gameState.currentPlayerIndex].color;
-        if (isMyUnit && !gameState.players[gameState.currentPlayerIndex].isAI) {
-            if (unit.movesLeft > 0) setGameState(prev => ({ ...prev, selectedHexId: hexId }));
-            else setGameState(prev => ({ ...prev, gameLog: [`Exhausted!`, ...prev.gameLog] }));
-        }
-      }
+       // SELECT
+       setGameState(prev => ({ ...prev, selectedHexId: hexId }));
     } else {
+      // ACTION OR DESELECT
       const fromId = gameState.selectedHexId;
-      if (fromId === hexId) setGameState(prev => ({ ...prev, selectedHexId: null }));
+      if (fromId === hexId) {
+          setGameState(prev => ({ ...prev, selectedHexId: null })); // Deselect if clicking same
+      }
       else if (validMoves.includes(hexId) || validAttacks.includes(hexId)) {
           handleMove(fromId, hexId);
           setGameState(prev => ({ ...prev, selectedHexId: null }));
       } else {
-          setGameState(prev => ({ ...prev, selectedHexId: null }));
+          // Change selection to new tile
+          setGameState(prev => ({ ...prev, selectedHexId: hexId }));
       }
     }
   };
@@ -166,10 +163,24 @@ const App: React.FC = () => {
           default: return <User {...props} />;
       }
   };
+  
+  // Helper for Terrain Icon
+  const getTerrainIcon = (type: string) => {
+      const props = { size: 20, className: "text-white opacity-80" };
+      switch(type) {
+          case 'WOOD': return <Trees {...props} className="text-green-400" />;
+          case 'BRICK': return <BrickWall {...props} className="text-red-400" />;
+          case 'WHEAT': return <Wheat {...props} className="text-yellow-400" />;
+          case 'ORE': return <Mountain {...props} className="text-slate-400" />;
+          case 'WATER': return <Droplets {...props} className="text-blue-400" />;
+          default: return <Map {...props} />;
+      }
+  };
 
   if (setupMode) {
     return (
       <div className="min-h-screen bg-slate-900 text-white flex flex-col items-center justify-center p-6 pb-24">
+        {/* ... (Existing Setup Mode JSX remains unchanged, omitted for brevity but assumed present in full file) ... */}
         {showInstructions && (
             <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[110] p-4">
                 <div className="bg-slate-800 p-6 rounded-2xl max-w-2xl w-full border border-slate-700 shadow-2xl relative max-h-[90vh] overflow-y-auto">
@@ -406,8 +417,9 @@ const App: React.FC = () => {
   // Combat Overlay Rendering
   const combat = gameState.combatResult;
 
-  // Selected Unit Logic for Unit Card
-  const selectedUnit = gameState.selectedHexId ? gameState.units[gameState.tiles[gameState.selectedHexId]?.unitId || ''] : null;
+  // Selected Logic for Mobile Inspector
+  const selectedTile = gameState.selectedHexId ? gameState.tiles[gameState.selectedHexId] : null;
+  const selectedUnit = selectedTile?.unitId ? gameState.units[selectedTile.unitId] : null;
 
   return (
     <div className="flex h-screen bg-slate-950 overflow-hidden flex-col lg:flex-row relative">
@@ -422,7 +434,7 @@ const App: React.FC = () => {
                          <div className="flex flex-col items-center text-white">
                              <Sword size={64} className="mb-2" />
                              <span className="text-2xl font-bold uppercase">{combat.attacker.type}</span>
-                             <span className="text-6xl font-black mt-4">{combat.attacker.power}</span>
+                             <span className="text-6xl font-black mt-4">{combat.attacker.attack}</span>
                          </div>
                      </div>
                  </div>
@@ -436,7 +448,7 @@ const App: React.FC = () => {
                          <div className="flex flex-col items-center text-white">
                              <ShieldAlert size={64} className="mb-2" />
                              <span className="text-2xl font-bold uppercase">{combat.defender.type}</span>
-                             <span className="text-6xl font-black mt-4">{combat.defender.power}</span>
+                             <span className="text-6xl font-black mt-4">{combat.defender.defense}</span>
                              {combat.defender.bonus > 0 && <span className="text-sm bg-black/30 px-2 py-1 rounded mt-2">+{combat.defender.bonus} DEFENSE</span>}
                          </div>
                      </div>
@@ -453,62 +465,84 @@ const App: React.FC = () => {
           </div>
       )}
 
-      {/* Selected Unit Details Card */}
-      {selectedUnit && (
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[100] animate-in slide-in-from-bottom-6 duration-300">
-             <div className="bg-slate-900/90 backdrop-blur-md border-2 border-slate-600 rounded-2xl p-4 shadow-2xl flex items-center gap-6 min-w-[320px]">
+      {/* Selected Tile Inspector (Mobile & Desktop) */}
+      {selectedTile && (
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[100] animate-in slide-in-from-bottom-6 duration-300 pointer-events-none">
+             <div className="bg-slate-900/95 backdrop-blur-md border-2 border-slate-600 rounded-2xl p-4 shadow-2xl flex items-center gap-6 min-w-[340px] pointer-events-auto">
                   
-                  {/* Icon & Identity */}
-                  <div className={`w-16 h-16 rounded-full ${PLAYER_BG_COLORS[selectedUnit.owner]} flex items-center justify-center border-4 border-white shadow-lg`}>
-                       {getUnitIcon(selectedUnit.type)}
+                  {/* Left Side: Identity (Unit OR Terrain) */}
+                  <div className={`w-16 h-16 rounded-full flex items-center justify-center border-4 border-white shadow-lg shrink-0 ${selectedUnit ? PLAYER_BG_COLORS[selectedUnit.owner] : 'bg-slate-700'}`}>
+                       {selectedUnit ? getUnitIcon(selectedUnit.type) : getTerrainIcon(selectedTile.resource)}
                   </div>
 
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-start mb-2">
                           <div>
-                              <h3 className="text-xl font-black text-white uppercase leading-none">{selectedUnit.type}</h3>
-                              <p className={`text-xs font-bold ${PLAYER_COLORS[selectedUnit.owner]} uppercase opacity-90`}>{selectedUnit.owner} Faction</p>
+                              <h3 className="text-lg font-black text-white uppercase leading-none truncate">
+                                  {selectedUnit ? selectedUnit.type : TERRAIN_TYPE[selectedTile.resource]}
+                              </h3>
+                              <p className={`text-xs font-bold uppercase opacity-90 truncate ${selectedUnit ? PLAYER_COLORS[selectedUnit.owner] : 'text-slate-400'}`}>
+                                  {selectedUnit ? `${selectedUnit.owner} Faction` : `${selectedTile.resource}`}
+                              </p>
                           </div>
+                          {/* Close Button for Selection */}
+                          <button onClick={() => setGameState(prev => ({...prev, selectedHexId: null}))} className="text-slate-400 hover:text-white bg-black/20 rounded-full p-1"><X size={14} /></button>
                       </div>
 
                       {/* Stats Grid */}
-                      <div className="flex gap-4">
-                           {/* Attack */}
-                           <div className="flex flex-col items-center bg-red-900/40 p-2 rounded-lg border border-red-500/30 min-w-[60px]">
-                               <Sword size={16} className="text-red-400 mb-1" />
-                               <span className="text-lg font-black text-white">{selectedUnit.attack}</span>
-                               <span className="text-[9px] text-red-200 uppercase font-bold">ATK</span>
+                      <div className="flex gap-2">
+                           {/* Defense (Terrain + Wall + Unit) */}
+                           <div className="flex flex-col items-center bg-blue-900/40 p-1.5 rounded border border-blue-500/30 min-w-[50px]">
+                               <Shield size={14} className="text-blue-400 mb-0.5" />
+                               <span className="text-sm font-black text-white">
+                                   {(TERRAIN_DEFENSE[selectedTile.resource] || 0) + (selectedTile.hasWall ? 3 : 0) + (selectedUnit ? selectedUnit.defense : 0)}
+                               </span>
+                               <span className="text-[8px] text-blue-200 uppercase font-bold">DEF</span>
                            </div>
 
-                           {/* Defense */}
-                           <div className="flex flex-col items-center bg-blue-900/40 p-2 rounded-lg border border-blue-500/30 min-w-[60px]">
-                               <Shield size={16} className="text-blue-400 mb-1" />
-                               <span className="text-lg font-black text-white">{selectedUnit.defense}</span>
-                               <span className="text-[9px] text-blue-200 uppercase font-bold">DEF</span>
-                           </div>
+                           {/* Attack (Unit Only) */}
+                           {selectedUnit && (
+                               <div className="flex flex-col items-center bg-red-900/40 p-1.5 rounded border border-red-500/30 min-w-[50px]">
+                                   <Sword size={14} className="text-red-400 mb-0.5" />
+                                   <span className="text-sm font-black text-white">{selectedUnit.attack}</span>
+                                   <span className="text-[8px] text-red-200 uppercase font-bold">ATK</span>
+                               </div>
+                           )}
 
-                           {/* Movement */}
-                           <div className="flex flex-col items-center bg-green-900/40 p-2 rounded-lg border border-green-500/30 min-w-[80px] flex-1">
-                               <div className="flex items-center gap-2 mb-1">
-                                   <Footprints size={16} className="text-green-400" />
-                                   <span className="text-lg font-black text-white">{selectedUnit.movesLeft}<span className="text-sm text-green-300/50">/{selectedUnit.maxMoves}</span></span>
+                           {/* Movement (Unit Only) */}
+                           {selectedUnit && (
+                               <div className="flex flex-col items-center bg-green-900/40 p-1.5 rounded border border-green-500/30 min-w-[50px]">
+                                   <Footprints size={14} className="text-green-400 mb-0.5" />
+                                   <span className="text-sm font-black text-white">{selectedUnit.movesLeft}</span>
+                                   <span className="text-[8px] text-green-200 uppercase font-bold">MOVE</span>
                                </div>
-                               
-                               {/* Mini Progress Bar for Movement */}
-                               <div className="w-full h-1.5 bg-green-950 rounded-full overflow-hidden">
-                                   <div 
-                                        className="h-full bg-green-500 transition-all duration-500" 
-                                        style={{ width: `${(selectedUnit.movesLeft / selectedUnit.maxMoves) * 100}%`}}
-                                   />
+                           )}
+
+                           {/* Structure Info (If no Unit, or compact if unit exists) */}
+                           {selectedTile.structure && (
+                               <div className="flex flex-col items-center bg-yellow-900/40 p-1.5 rounded border border-yellow-500/30 min-w-[50px]">
+                                   {selectedTile.structure === StructureType.CITY ? <Building2 size={14} className="text-yellow-400 mb-0.5" /> :
+                                    selectedTile.structure === StructureType.WONDER ? <Star size={14} className="text-yellow-400 mb-0.5" /> :
+                                    selectedTile.structure === StructureType.MONOLITH ? <Gem size={14} className="text-purple-400 mb-0.5" /> :
+                                    <Home size={14} className="text-yellow-400 mb-0.5" />}
+                                   <span className="text-[9px] font-bold text-white uppercase truncate max-w-[60px]">{STRUCTURE_STATS[selectedTile.structure].name}</span>
                                </div>
-                           </div>
+                           )}
+                           
+                           {/* Empty State / Resource Info */}
+                           {!selectedUnit && !selectedTile.structure && (
+                                <div className="flex flex-col items-center bg-slate-800 p-1.5 rounded border border-slate-600 min-w-[50px]">
+                                    <span className="text-[9px] text-slate-400">Yield</span>
+                                    <span className="text-sm font-bold text-white">+1</span>
+                                </div>
+                           )}
                       </div>
                   </div>
              </div>
         </div>
       )}
 
-      {/* Modals */}
+      {/* Modals ... (Existing Modals remain unchanged) ... */}
       {showInviteModal && isOnline && matchId && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4">
               <div className="bg-slate-800 p-6 rounded-2xl max-w-md w-full border border-indigo-500 shadow-2xl">
@@ -630,7 +664,7 @@ const App: React.FC = () => {
 
         {buildItem && <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 bg-indigo-600 text-white px-6 py-2 rounded-full shadow-2xl font-bold text-sm animate-pulse">Select target tile for {buildItem.id}</div>}
 
-        <HexGrid gameState={gameState} onTileClick={handleTileClick} validMoves={validMoves} validAttacks={validAttacks} />
+        <HexGrid gameState={gameState} onTileClick={handleTileClick} validMoves={validMoves} validAttacks={validAttacks} localPlayerColor={localPlayerColor} />
       </div>
 
       {/* Responsive Sidebar */}

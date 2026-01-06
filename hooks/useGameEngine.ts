@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { GameState, Player, PlayerColor, Tile, Unit, UnitType, StructureType, ResourceType, FloatingText, MatchData, TechType, MapType, CombatResult } from '../types';
 import { generateGrid, getHexId, getNeighbors, calculateVisibleHexes, generateNewTile, hexToPixel } from '../utils/hexUtils';
 import { BOARD_RADIUS, MAX_MAP_RADIUS, INITIAL_RESOURCES, UNIT_STATS, STRUCTURE_STATS, TERRAIN_TYPE, RESOURCES, TERRAIN_DEFENSE, TECH_STATS, WONDER_VICTORY_TURNS } from '../constants';
-import { getAIMove } from '../services/geminiService';
+import { getAIMove, getAIPersonalityMessage } from '../services/geminiService';
 import { createOnlineGame, joinOnlineGame, subscribeToMatch, updateMatchState, isFirebaseInitialized, initFirebase } from '../services/firebaseService';
 import { playSound } from '../utils/soundUtils';
 
@@ -55,7 +55,6 @@ const ensureFrontier = (tiles: Record<string, Tile>, mapType: MapType = MapType.
 const createInitialState = (numPlayers: number, mapType: MapType = MapType.PANGAEA, humanColor: PlayerColor = PlayerColor.RED): GameState => {
   let tiles = generateGrid(BOARD_RADIUS, mapType);
   
-  // Arrange colors so the human/host color is first (index 0)
   const allColors = [PlayerColor.RED, PlayerColor.BLUE, PlayerColor.GREEN, PlayerColor.YELLOW];
   const aiColors = allColors.filter(c => c !== humanColor);
   const colors = [humanColor, ...aiColors].slice(0, numPlayers);
@@ -85,7 +84,6 @@ const createInitialState = (numPlayers: number, mapType: MapType = MapType.PANGA
   players.forEach((p, idx) => {
     let hqId = startIds[idx] && tiles[startIds[idx]] ? startIds[idx] : Object.keys(tiles)[idx];
     
-    // --- MAP BALANCING: Ensure Playable Start ---
     if (tiles[hqId].resource === 'WATER') {
         const neighbors = getNeighbors(tiles[hqId]);
         const landNeighbor = neighbors.find(n => tiles[getHexId(n.q, n.r, n.s)]?.resource !== 'WATER');
@@ -125,7 +123,7 @@ const createInitialState = (numPlayers: number, mapType: MapType = MapType.PANGA
       tiles[hqId].controller = p.color;
       tiles[hqId].isHQ = true;
       tiles[hqId].structure = StructureType.SETTLEMENT;
-      tiles[hqId].hasRoad = true; // HQ acts as a road hub
+      tiles[hqId].hasRoad = true;
     }
   });
   
@@ -142,7 +140,8 @@ const createInitialState = (numPlayers: number, mapType: MapType = MapType.PANGA
     selectedHexId: null,
     isProcessing: false,
     visibleHexes: [],
-    effects: []
+    effects: [],
+    history: []
   };
 
   initialState.visibleHexes = calculateVisibleHexes(initialState, humanColor);
@@ -186,6 +185,15 @@ export const useGameEngine = () => {
           return () => clearTimeout(timer);
       }
   }, [gameState.combatResult]);
+
+  useEffect(() => {
+      if (gameState.aiTaunt) {
+          const timer = setTimeout(() => {
+              setGameState(prev => ({ ...prev, aiTaunt: null }));
+          }, 6000);
+          return () => clearTimeout(timer);
+      }
+  }, [gameState.aiTaunt]);
 
   const addEffect = useCallback((text: string, tileId: string, color: string) => {
       setGameState(prev => {
@@ -364,6 +372,21 @@ export const useGameEngine = () => {
       
       let nextState = { ...prev };
 
+      // SNAPSHOT FOR HISTORY GRAPH
+      const stats: Record<PlayerColor, { military: number, economy: number }> = {} as any;
+      prev.players.forEach(p => {
+         // Explicitly type Object.values to avoid 'unknown' type inference issues
+         const units = (Object.values(prev.units) as Unit[]).filter(u => u.owner === p.color);
+         const tiles = (Object.values(prev.tiles) as Tile[]).filter(t => t.controller === p.color);
+         
+         // Simplified Score
+         stats[p.color] = {
+             military: units.reduce((acc, u) => acc + (u.attack + u.defense), 0),
+             economy: tiles.length + (Object.values(p.resources) as number[]).reduce((a,b) => a+b, 0)
+         };
+      });
+      nextState.history = [...(prev.history || []), { turn: prev.turn, playerStats: stats }];
+
       // CHECK FOR WONDER VICTORY
       if (prev.wonderOwner && prev.wonderBuiltAt) {
           const wonderTile = (Object.values(prev.tiles) as Tile[]).find(t => t.structure === StructureType.WONDER);
@@ -407,7 +430,7 @@ export const useGameEngine = () => {
                   newResources.ORE += 2;
               }
               if (t.resource === 'WATER') {
-                  newResources.WHEAT += 1; // Basic fishing
+                  newResources.WHEAT += 1; 
               } else {
                   newResources[t.resource] += amount;
               }
@@ -546,16 +569,14 @@ export const useGameEngine = () => {
         if (tile.controller !== player.color) return prev;
         if (itemCategory === 'UNIT' && tile.unitId) return prev;
         
-        // --- Structure Checks ---
         if (itemCategory === 'STRUCTURE') {
-            // Cannot build a structure if one exists, UNLESS it's an upgrade from Settlement to City
             if (tile.structure) {
                 if (tile.structure === StructureType.SETTLEMENT && itemId === StructureType.CITY) {
                     // Allowed: Upgrade
                 } else if (itemId === StructureType.ROAD && !tile.hasRoad) {
-                    // Allowed: Road is separate boolean
+                    // Allowed: Road
                 } else if (itemId === StructureType.WALL && !tile.hasWall) {
-                    // Allowed: Wall is separate boolean
+                    // Allowed: Wall
                 } else {
                     return { ...prev, gameLog: ["Space already occupied.", ...prev.gameLog] };
                 }
@@ -657,7 +678,6 @@ export const useGameEngine = () => {
         updatedTiles = ensureFrontier(updatedTiles);
         playSound('BUILD');
         
-        // Log obfuscation
         const isLocal = (!isOnline && !player.isAI) || (isOnline && player.color === localPlayerColor);
         let logMsg = "";
         if (isLocal) {
@@ -675,8 +695,11 @@ export const useGameEngine = () => {
     });
   }, [isOnline, localPlayerColor, matchId, isSpectatorMode, addEffect]);
 
-  const handleMove = useCallback((fromHexId: string, toHexId: string) => {
+  const handleMove = useCallback(async (fromHexId: string, toHexId: string) => {
     if (typeof fromHexId !== 'string' || typeof toHexId !== 'string') return;
+
+    let newStateSnapshot: GameState | null = null;
+    let geminiTrigger: { type: 'VICTORY' | 'DEFEAT' | 'EXPANSION', player: PlayerColor } | null = null;
 
     setGameState(prev => {
         const player = prev.players[prev.currentPlayerIndex];
@@ -747,6 +770,7 @@ export const useGameEngine = () => {
              nextState = { ...nextState, gameLog: [logMsg, ...prev.gameLog] };
         }
 
+        // --- COMBAT LOGIC ---
         if (toTile.unitId) {
             const targetUnit = prev.units[toTile.unitId];
             const targetPlayer = prev.players.find(p => p.color === targetUnit.owner);
@@ -754,6 +778,49 @@ export const useGameEngine = () => {
             if (targetUnit.owner === player.color) return prev;
             
             combatOccurred = true;
+
+            // Spy Mechanic: Reveal only
+            if (unit.type === UnitType.SPY) {
+                 newUnits[targetUnit.id] = { ...targetUnit, revealed: true };
+                 // Spy dies
+                 delete newUnits[unit.id];
+                 newTiles[fromHexId] = { ...newTiles[fromHexId], unitId: null };
+                 
+                 nextState = {
+                     ...nextState,
+                     combatResult: {
+                        attacker: { type: unit.type, attack: 0, owner: unit.owner },
+                        defender: { type: targetUnit.type, defense: targetUnit.defense, owner: targetUnit.owner, bonus: 0 },
+                        outcome: 'REVEAL',
+                        timestamp: Date.now(),
+                        tileId: toHexId
+                     },
+                     units: newUnits,
+                     tiles: newTiles,
+                     gameLog: [`Spy revealed ${targetUnit.type}!`, ...prev.gameLog]
+                 };
+                 playSound('ATTACK_WIN'); 
+                 newStateSnapshot = nextState;
+                 return nextState;
+            }
+
+            // Decoy Mechanic: Dies instantly if attacked
+            if (targetUnit.type === UnitType.DECOY) {
+                 delete newUnits[targetUnit.id];
+                 newTiles[toHexId] = { ...newTiles[toHexId], unitId: unit.id, controller: unit.owner };
+                 newTiles[fromHexId] = { ...newTiles[fromHexId], unitId: null };
+                 newUnits[unit.id] = { ...unit, movesLeft: unit.movesLeft - 1 };
+                 
+                 nextState = {
+                     ...nextState,
+                     units: newUnits,
+                     tiles: newTiles,
+                     gameLog: [`Decoy destroyed!`, ...prev.gameLog]
+                 };
+                 playSound('ATTACK_WIN');
+                 newStateSnapshot = nextState;
+                 return nextState;
+            }
             
             const factionAttackBonus = player.color === PlayerColor.RED ? 1 : 0;
             const attackerBonus = (player.techs.includes(TechType.METALLURGY) ? 1 : 0) + factionAttackBonus;
@@ -787,7 +854,8 @@ export const useGameEngine = () => {
                 attacker: { type: unit.type, attack: totalAttack, owner: unit.owner },
                 defender: { type: targetUnit.type, defense: totalDefense, owner: targetUnit.owner, bonus: defenseBonus + defenderTechBonus },
                 outcome,
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                tileId: toHexId
             };
 
             let msg = '';
@@ -798,11 +866,13 @@ export const useGameEngine = () => {
                 newTiles[toHexId] = { ...newTiles[toHexId], unitId: unit.id, controller: unit.owner };
                 if (newUnits[unit.id]) newUnits[unit.id].movesLeft -= 1;
                 playSound('ATTACK_WIN');
+                geminiTrigger = { type: 'VICTORY', player: player.color };
             } else if (outcome === 'LOSS') {
                 msg = `${unit.owner} ${unit.type} was SLAIN by ${targetUnit.owner}!`;
                 delete newUnits[unit.id];
                 newTiles[fromHexId] = { ...newTiles[fromHexId], unitId: null };
                 playSound('ATTACK_LOSS');
+                geminiTrigger = { type: 'DEFEAT', player: player.color };
             } else {
                 msg = `Both units destroyed!`;
                 delete newUnits[unit.id]; delete newUnits[targetUnit.id];
@@ -821,7 +891,6 @@ export const useGameEngine = () => {
                  newUnits[unit.id] = { ...unit, movesLeft: unit.movesLeft - 1 };
             }
             
-            // Log obfuscation
             const isLocal = (!isOnline && !player.isAI) || (isOnline && player.color === localPlayerColor);
             const logMsg = isLocal ? `${player.color} moved to ${toHexId}` : `${player.color} is maneuvering`;
             
@@ -832,8 +901,31 @@ export const useGameEngine = () => {
         nextState.tiles = ensureFrontier(nextState.tiles);
         nextState.visibleHexes = getVisibleHexes(nextState, isSpectatorMode);
         if (isOnline && matchId) updateMatchState(matchId, nextState);
+        newStateSnapshot = nextState;
         return nextState;
     });
+
+    // Handle Gemini Taunt Async
+    if (geminiTrigger && newStateSnapshot) {
+        // Only if it's an AI player doing the action
+        const player = newStateSnapshot.players.find(p => p.color === geminiTrigger!.player);
+        if (player && player.isAI && !isOnline) {
+             const key = DEFAULT_FIREBASE_CONFIG.apiKey; // Using FB key as placeholder for Gemini key logic if needed, but really we should use a proper env var. 
+             // In this demo, we assume the user has the key. We will skip if key is generic.
+             // However, for the purpose of the demo, we call the service.
+             
+             // Using the key from process.env if available, or the one from firebase config if it looks like an API key.
+             const apiKey = (process.env.API_KEY || (DEFAULT_FIREBASE_CONFIG.apiKey.startsWith("AIza") ? DEFAULT_FIREBASE_CONFIG.apiKey : ""));
+
+             if (apiKey) {
+                 const text = await getAIPersonalityMessage(newStateSnapshot, geminiTrigger.player, geminiTrigger.type, apiKey);
+                 if (text) {
+                     setGameState(prev => ({ ...prev, aiTaunt: { text, speaker: geminiTrigger!.player } }));
+                 }
+             }
+        }
+    }
+
   }, [isOnline, localPlayerColor, matchId, isSpectatorMode, addEffect]);
 
   const handleTrade = useCallback((giveResource: ResourceType, getResource: ResourceType) => {

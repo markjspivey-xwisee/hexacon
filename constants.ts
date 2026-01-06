@@ -31,36 +31,55 @@ export const FACTION_INFO: Record<PlayerColor, { name: string, description: stri
   }
 };
 
-export const UNIT_STATS: Record<UnitType, { attack: number; defense: number; moves: number; cost: Record<ResourceType, number> }> = {
+export const UNIT_STATS: Record<UnitType, { attack: number; defense: number; moves: number; cost: Record<ResourceType, number>; description?: string }> = {
   [UnitType.SCOUT]: { 
     attack: 2,
     defense: 1,
     moves: 2,
-    cost: { WOOD: 1, BRICK: 0, WHEAT: 1, ORE: 0, WATER: 0 } 
+    cost: { WOOD: 1, BRICK: 0, WHEAT: 1, ORE: 0, WATER: 0 },
+    description: "Fast exploration."
   },
   [UnitType.SOLDIER]: { 
     attack: 4,
     defense: 4,
     moves: 1,
-    cost: { WOOD: 1, BRICK: 1, WHEAT: 1, ORE: 0, WATER: 0 } 
+    cost: { WOOD: 1, BRICK: 1, WHEAT: 1, ORE: 0, WATER: 0 },
+    description: "Balanced infantry."
   },
   [UnitType.KNIGHT]: { 
     attack: 7,
     defense: 6,
     moves: 1,
-    cost: { WOOD: 0, BRICK: 2, WHEAT: 2, ORE: 1, WATER: 0 } 
+    cost: { WOOD: 0, BRICK: 2, WHEAT: 2, ORE: 1, WATER: 0 },
+    description: "Strong attacker."
   },
   [UnitType.GENERAL]: { 
     attack: 9,
     defense: 9,
     moves: 1,
-    cost: { WOOD: 0, BRICK: 0, WHEAT: 3, ORE: 3, WATER: 0 } 
+    cost: { WOOD: 0, BRICK: 0, WHEAT: 3, ORE: 3, WATER: 0 },
+    description: "Ultimate unit."
   },
   [UnitType.GALLEY]: { 
     attack: 5,
     defense: 3,
     moves: 3,
-    cost: { WOOD: 2, BRICK: 0, WHEAT: 1, ORE: 0, WATER: 0 } 
+    cost: { WOOD: 2, BRICK: 0, WHEAT: 1, ORE: 0, WATER: 0 },
+    description: "Naval dominance."
+  },
+  [UnitType.SPY]: { 
+    attack: 0,
+    defense: 1,
+    moves: 3,
+    cost: { WOOD: 2, BRICK: 0, WHEAT: 2, ORE: 0, WATER: 0 },
+    description: "Sacrifice to reveal enemy unit."
+  },
+  [UnitType.DECOY]: { 
+    attack: 0,
+    defense: 0,
+    moves: 1,
+    cost: { WOOD: 1, BRICK: 0, WHEAT: 1, ORE: 0, WATER: 0 },
+    description: "Fake unit. Dies instantly."
   },
 };
 
