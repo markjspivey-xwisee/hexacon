@@ -7,6 +7,22 @@ let app: FirebaseApp | null = null;
 let db: Firestore | null = null;
 let auth: Auth | null = null;
 
+// Safer JSON serializer that handles circular references
+const safeJsonStringify = (obj: any) => {
+    const cache = new Set();
+    return JSON.stringify(obj, (key, value) => {
+        if (typeof value === 'object' && value !== null) {
+            if (cache.has(value)) {
+                // Circular reference found, discard key
+                return;
+            }
+            // Store value in our collection
+            cache.add(value);
+        }
+        return value;
+    });
+};
+
 export const initFirebase = (config: any) => {
   try {
     const apps = getApps();
@@ -92,7 +108,9 @@ export const createOnlineGame = async (initialState: GameState, hostPlayerId: st
   };
 
   try {
-    await setDoc(matchRef, matchData);
+    // Sanitize using safer stringify
+    const cleanData = JSON.parse(safeJsonStringify(matchData));
+    await setDoc(matchRef, cleanData);
   } catch (e: any) {
     console.error("Firestore Write Error:", e);
     // Explicitly handle the "undefined" field error if it somehow slips through config
@@ -167,8 +185,11 @@ export const updateMatchState = async (matchId: string, newState: GameState) => 
   if (!db) return;
   const matchRef = doc(db, "matches", matchId);
   try {
+    // Sanitize state to remove circular dependencies using custom serializer
+    const cleanState = JSON.parse(safeJsonStringify(newState));
+    
     await updateDoc(matchRef, {
-      gameState: newState
+      gameState: cleanState
     });
   } catch (e: any) {
     // Suppress logs for expected permission issues to avoid console spam

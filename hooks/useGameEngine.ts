@@ -163,14 +163,11 @@ export const useGameEngine = () => {
   useEffect(() => {
     if (gameState.mode !== GameMode.MMO || gameState.winner) return;
     
-    // We only want ONE person to drive the database writes to avoid massive conflict.
-    // In a peer-to-peer style Firebase app, usually the "host" (index 0) drives the world clock.
-    // However, for local updates (animations/energy), everyone runs this.
-    const isHost = isOnline ? gameState.players[0].color === localPlayerColor : true;
-    
     const interval = setInterval(() => {
         const now = Date.now();
-        const lastTick = gameStateRef.current.lastTick || now;
+        // Use ref to get latest state synchronously without closure issues
+        const currentState = gameStateRef.current;
+        const lastTick = currentState.lastTick || now;
         const delta = now - lastTick;
         
         // Resource Tick (e.g. every 10s)
@@ -178,47 +175,44 @@ export const useGameEngine = () => {
              const ticksPassed = Math.floor(delta / MMO_CONFIG.RESOURCE_REGEN_INTERVAL);
              const remainder = delta % MMO_CONFIG.RESOURCE_REGEN_INTERVAL;
              
-             setGameState(prev => {
-                const nextState = { ...prev, lastTick: now - remainder };
+             // Calculate Next State
+             const nextState = { ...currentState, lastTick: now - remainder };
+             
+             // Regenerate Energy & Resources for EVERYONE
+             nextState.players = nextState.players.map(p => {
+                const newEnergy = Math.min(p.maxEnergy, p.energy + (10 * ticksPassed));
                 
-                // Regenerate Energy & Resources for EVERYONE
-                nextState.players = nextState.players.map(p => {
-                    const newEnergy = Math.min(p.maxEnergy, p.energy + (10 * ticksPassed));
-                    
-                    const newRes = { ...p.resources };
-                    const ecoBonus = p.techs.includes(TechType.ECONOMICS) ? 1 : 0;
-                    
-                    (Object.values(prev.tiles) as Tile[]).forEach(t => {
-                        if (t.controller === p.color) {
-                            let amount = (1 + ecoBonus) * ticksPassed;
-                            if (t.structure === StructureType.SETTLEMENT) amount += (1 * ticksPassed);
-                            if (t.structure === StructureType.CITY) amount += (2 * ticksPassed);
-                            
-                            if (t.resource === 'WATER') {
-                                newRes.WHEAT += amount; 
-                            } else {
-                                newRes[t.resource] += amount;
-                            }
+                const newRes = { ...p.resources };
+                const ecoBonus = p.techs.includes(TechType.ECONOMICS) ? 1 : 0;
+                
+                (Object.values(currentState.tiles) as Tile[]).forEach(t => {
+                    if (t.controller === p.color) {
+                        let amount = (1 + ecoBonus) * ticksPassed;
+                        if (t.structure === StructureType.SETTLEMENT) amount += (1 * ticksPassed);
+                        if (t.structure === StructureType.CITY) amount += (2 * ticksPassed);
+                        
+                        if (t.resource === 'WATER') {
+                            newRes.WHEAT += amount; 
+                        } else {
+                            newRes[t.resource] += amount;
                         }
-                    });
-                    
-                    return { ...p, resources: newRes, energy: newEnergy };
+                    }
                 });
                 
-                // Only host writes the world update to DB
-                if (isOnline && isHost && matchId) {
-                    updateMatchState(matchId, nextState);
-                }
-                
-                return nextState;
+                return { ...p, resources: newRes, energy: newEnergy };
              });
+             
+             // Trigger Side Effect (DB Write) OUTSIDE of reducer
+             const isHost = isOnline ? nextState.players[0].color === localPlayerColor : true;
+             if (isOnline && isHost && matchId) {
+                 updateMatchState(matchId, nextState).catch(err => {
+                     console.error("MMO Sync Error:", err);
+                 });
+             }
+             
+             // Update Local State
+             setGameState(nextState);
         } 
-        // Energy Tick (Local Interpolation for smooth UI)
-        else {
-             // Just purely local UI update for smoother bars? 
-             // Actually, simplest is just to let the main tick handle chunks, but we can do a small local energy drift
-             // For now, let's keep it sync'd to the main tick to avoid desync
-        }
 
     }, 1000);
 
@@ -546,6 +540,8 @@ export const useGameEngine = () => {
     });
   }, [isOnline, matchId, localPlayerColor, isSpectatorMode, gameState.mode]); 
 
+  // ... (The rest of the file logic - AI, handleConstruct, etc. remains the same)
+  
   // --- AI LOGIC LOOP (Disabled in MMO for now to avoid complexity) ---
   useEffect(() => {
     if (isOnline || gameState.mode === GameMode.MMO) return; 
@@ -580,8 +576,7 @@ export const useGameEngine = () => {
     }
   }, [gameState.currentPlayerIndex, gameState.turn, isOnline, setupMode, gameState.winner, gameState.mode]);
 
-  // ... (Other action handlers: handleResearch, handleConstruct, handleTrade, handleMove remain unchanged)
-  // Re-declare them here because we are replacing the full file content to ensure consistency.
+  // ... (Other handlers)
   
   const handleResearch = useCallback((tech: TechType) => {
       if (typeof tech !== 'string') return;

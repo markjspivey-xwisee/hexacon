@@ -32,7 +32,8 @@ export const getAIPersonalityMessage = async (gameState: GameState, playerColor:
             contents: prompt,
         });
         
-        return response.text.trim();
+        // Ensure we only return a string
+        return response.text?.trim() || "";
     } catch (e) {
         console.warn("Gemini Chat Error", e);
         return "";
