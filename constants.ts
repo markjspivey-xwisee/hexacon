@@ -5,6 +5,20 @@ export const BOARD_RADIUS = 5; // Initial starting size
 export const MAX_MAP_RADIUS = 9; // The hard limit for the world size (The Arena)
 export const WONDER_VICTORY_TURNS = 5;
 
+// MMO CONFIGURATION
+export const MMO_CONFIG = {
+  ENERGY_REGEN_INTERVAL: 2000, // ms
+  RESOURCE_REGEN_INTERVAL: 10000, // ms
+  MAX_ENERGY: 100,
+  ENERGY_COST: {
+    MOVE: 10,
+    ATTACK: 20,
+    BUILD_UNIT: 15,
+    BUILD_STRUCTURE: 25,
+    RESEARCH: 50
+  }
+};
+
 // Only these are tradeable/spendable in the UI
 export const RESOURCES: ResourceType[] = ['WOOD', 'BRICK', 'WHEAT', 'ORE'];
 
@@ -135,7 +149,7 @@ export const TECH_STATS: Record<TechType, { name: string; cost: Record<ResourceT
   [TechType.LOGISTICS]: {
     name: 'Logistics',
     cost: { WOOD: 2, BRICK: 0, WHEAT: 4, ORE: 0, WATER: 0 },
-    description: '+1 Move to Soldiers & Knights'
+    description: '+1 Move to Soldiers/Knights'
   },
   [TechType.ECONOMICS]: {
     name: 'Economics',

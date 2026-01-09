@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
-import { GameState, UnitType, StructureType, ResourceType, PlayerColor, Tile, Unit, Player, TechType } from '../types';
-import { RESOURCES, UNIT_STATS, STRUCTURE_STATS, PLAYER_BG_COLORS, PLAYER_COLORS, RESOURCE_COLORS, TERRAIN_DEFENSE, TECH_STATS, WONDER_VICTORY_TURNS } from '../constants';
-import { Shield, Sword, Axe, Crown, History, SkipForward, Copy, Check, Lightbulb, TrendingUp, Footprints, Eye, Hammer, Home, Construction, BrickWall, ChevronDown, ChevronUp, BarChart3, Lock, Loader2, ArrowRightLeft, Store, X, Volume2, VolumeX, BookOpen, Star, Anchor, Trees, Mountain, Wheat, Droplets, Compass, Ship, User, Gem, Milestone, Building2, UserX, MessageCircle } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { GameState, UnitType, StructureType, ResourceType, PlayerColor, Tile, Unit, Player, TechType, GameMode } from '../types';
+import { RESOURCES, UNIT_STATS, STRUCTURE_STATS, PLAYER_BG_COLORS, PLAYER_COLORS, RESOURCE_COLORS, TERRAIN_DEFENSE, TECH_STATS, WONDER_VICTORY_TURNS, MMO_CONFIG } from '../constants';
+import { Shield, Sword, Axe, Crown, History, SkipForward, Copy, Check, Lightbulb, TrendingUp, Footprints, Eye, Hammer, Home, Construction, BrickWall, ChevronDown, ChevronUp, BarChart3, Lock, Loader2, ArrowRightLeft, Store, X, Volume2, VolumeX, BookOpen, Star, Anchor, Trees, Mountain, Wheat, Droplets, Compass, Ship, User, Gem, Milestone, Building2, UserX, MessageCircle, Zap } from 'lucide-react';
 import { toggleMute, getMuteState } from '../utils/soundUtils';
 
 interface GameUIProps {
@@ -81,13 +81,14 @@ const TechIcon: React.FC<{ type: TechType }> = ({ type }) => {
 
 export const GameUI: React.FC<GameUIProps> = ({ gameState, onEndTurn, onBuild, onTrade, onShare, onShowStats, onResearch, isMobile, localPlayerColor, selectedAction }) => {
   const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+  const isMMO = gameState.mode === GameMode.MMO;
   
   const isOnline = !!localPlayerColor;
   const displayedPlayer = isOnline 
       ? gameState.players.find(p => p.color === localPlayerColor) || currentPlayer 
       : currentPlayer;
 
-  const isMyTurn = isOnline ? currentPlayer.color === localPlayerColor : true;
+  const isMyTurn = isOnline ? (isMMO ? true : currentPlayer.color === localPlayerColor) : true;
   const isAI = displayedPlayer.isAI;
   
   const [copied, setCopied] = useState(false);
@@ -134,7 +135,7 @@ export const GameUI: React.FC<GameUIProps> = ({ gameState, onEndTurn, onBuild, o
   }, [gameState.tiles, displayedPlayer.color, displayedPlayer.techs]);
 
   const advice = useMemo(() => {
-    if (!isMyTurn && isOnline) return `Waiting for ${currentPlayer.color} to end turn...`;
+    if (!isMyTurn && isOnline && !isMMO) return `Waiting for ${currentPlayer.color} to end turn...`;
     if (gameState.isProcessing) return "AI is calculating optimum strategy...";
     if (isAI && !isOnline) return "Opponent is thinking...";
     
@@ -143,13 +144,8 @@ export const GameUI: React.FC<GameUIProps> = ({ gameState, onEndTurn, onBuild, o
     const totalIncome = (Object.values(income) as number[]).reduce((a: number, b: number) => a + b, 0);
     if (totalIncome < 6) return "Economy is weak. Build Settlements or Research Economics.";
     
-    // Wonder Check
-    if (gameState.wonderOwner && gameState.wonderOwner !== displayedPlayer.color) {
-        return "WARNING: Enemy Wonder detected! Destroy it before time runs out!";
-    }
-
     return "Expand into the Fog of War.";
-  }, [gameState, displayedPlayer, isAI, income, isMyTurn, isOnline, currentPlayer.color]);
+  }, [gameState, displayedPlayer, isAI, income, isMyTurn, isOnline, currentPlayer.color, isMMO]);
 
   const canTrade = displayedPlayer.resources[tradeGive] >= 3;
 
@@ -218,8 +214,8 @@ export const GameUI: React.FC<GameUIProps> = ({ gameState, onEndTurn, onBuild, o
       
       <div className="flex justify-between items-center pb-2 border-b border-slate-700">
         <div>
-          <h1 className="text-xl font-bold text-white tracking-tight">Hexacon</h1>
-          <p className="text-xs text-slate-400">Turn {gameState.turn}</p>
+          <h1 className="text-xl font-bold text-white tracking-tight">Hexacon <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-900 text-indigo-200">{isMMO ? 'MMO' : 'TB'}</span></h1>
+          <p className="text-xs text-slate-400">{isMMO ? 'Real-Time Era' : `Turn ${gameState.turn}`}</p>
         </div>
         <div className="flex gap-1">
             <button onClick={handleMuteToggle} className="p-2 text-slate-400 hover:text-indigo-400" title={isMuted ? "Unmute" : "Mute"}>
@@ -246,7 +242,7 @@ export const GameUI: React.FC<GameUIProps> = ({ gameState, onEndTurn, onBuild, o
       </div>
 
       <div className={`p-4 rounded-xl shadow-lg text-white ${PLAYER_BG_COLORS[displayedPlayer.color]} transition-all relative overflow-hidden`}>
-        {!isMyTurn && isOnline && (
+        {!isMyTurn && isOnline && !isMMO && (
             <div className="absolute inset-0 bg-black/20 flex items-center justify-center backdrop-blur-[1px] z-10">
                 <span className="font-bold text-white/90 bg-black/40 px-3 py-1 rounded-full text-xs border border-white/20">
                     {currentPlayer.color}'s Turn
@@ -272,6 +268,23 @@ export const GameUI: React.FC<GameUIProps> = ({ gameState, onEndTurn, onBuild, o
            ))}
         </div>
         
+        {/* MMO Energy Bar */}
+        {isMMO && (
+            <div className="mb-2 bg-black/30 p-2 rounded-lg">
+                <div className="flex justify-between text-xs font-bold mb-1">
+                    <span className="flex items-center gap-1"><Zap size={12} className="text-yellow-300" /> ENERGY</span>
+                    <span>{Math.floor(displayedPlayer.energy)} / {displayedPlayer.maxEnergy}</span>
+                </div>
+                <div className="h-2 bg-black/40 rounded-full overflow-hidden">
+                    <div 
+                        className="h-full bg-yellow-400 transition-all duration-300"
+                        style={{ width: `${(displayedPlayer.energy / displayedPlayer.maxEnergy) * 100}%` }}
+                    />
+                </div>
+                <div className="text-[9px] text-right mt-0.5 opacity-70">Regens over time</div>
+            </div>
+        )}
+
         {/* Tech Tree Display in Player Card */}
         {displayedPlayer.techs.length > 0 && (
             <div className="bg-black/30 rounded-lg p-2 flex items-center gap-2 flex-wrap">
@@ -310,7 +323,7 @@ export const GameUI: React.FC<GameUIProps> = ({ gameState, onEndTurn, onBuild, o
       )}
 
       {(!isAI || isOnline) && (
-        <div className={`flex-1 flex flex-col min-h-0 space-y-2 transition-opacity duration-200 ${(!isMyTurn && isOnline) ? 'opacity-50 pointer-events-none' : ''}`}>
+        <div className={`flex-1 flex flex-col min-h-0 space-y-2 transition-opacity duration-200 ${(!isMyTurn && isOnline && !isMMO) ? 'opacity-50 pointer-events-none' : ''}`}>
             <div className="flex justify-between items-center">
                  <h3 className="text-xs uppercase text-slate-500 font-bold">Construction</h3>
                  <div className="flex items-center gap-2">
@@ -335,14 +348,16 @@ export const GameUI: React.FC<GameUIProps> = ({ gameState, onEndTurn, onBuild, o
                         const cost = stats.cost;
                         const hasTech = displayedPlayer.techs.includes(tech as TechType);
                         const canAfford = !hasTech && Object.entries(cost).every(([r, amt]: [any, any]) => displayedPlayer.resources[r as ResourceType] >= amt);
-                        
+                        const energyCost = isMMO ? MMO_CONFIG.ENERGY_COST.RESEARCH : 0;
+                        const hasEnergy = isMMO ? displayedPlayer.energy >= energyCost : true;
+
                         return (
                             <button
                                 key={tech} 
-                                disabled={hasTech || !canAfford} 
+                                disabled={hasTech || !canAfford || !hasEnergy} 
                                 onClick={() => onResearch && onResearch(tech as TechType)}
                                 className={`flex flex-col p-3 rounded-xl border transition-all text-left relative min-h-[64px]
-                                    ${hasTech ? 'bg-green-900/30 border-green-700 opacity-60' : (canAfford ? 'bg-slate-800 border-slate-600 active:scale-[0.98]' : 'bg-slate-900/50 opacity-40 cursor-not-allowed')}`}
+                                    ${hasTech ? 'bg-green-900/30 border-green-700 opacity-60' : (canAfford && hasEnergy ? 'bg-slate-800 border-slate-600 active:scale-[0.98]' : 'bg-slate-900/50 opacity-40 cursor-not-allowed')}`}
                             >
                                 <div className="flex justify-between items-center w-full z-10">
                                     <span className="font-bold text-sm flex items-center gap-2">
@@ -354,9 +369,12 @@ export const GameUI: React.FC<GameUIProps> = ({ gameState, onEndTurn, onBuild, o
                                     </div>
                                 </div>
                                 <div className="text-[11px] text-slate-300 italic mt-1">{stats.description}</div>
-                                {!hasTech && <div className="flex gap-2 mt-2 text-[10px] text-slate-400">
-                                    {Object.entries(cost).map(([r, amt]: [any, any]) => amt > 0 && <span key={r}>{amt}{r[0]}</span>)}
-                                </div>}
+                                <div className="flex justify-between mt-2">
+                                    {!hasTech && <div className="flex gap-2 text-[10px] text-slate-400">
+                                        {Object.entries(cost).map(([r, amt]: [any, any]) => amt > 0 && <span key={r}>{amt}{r[0]}</span>)}
+                                    </div>}
+                                    {isMMO && !hasTech && <span className="text-[10px] text-yellow-300 font-bold flex items-center"><Zap size={10}/> {energyCost}</span>}
+                                </div>
                             </button>
                         );
                     })
@@ -367,6 +385,9 @@ export const GameUI: React.FC<GameUIProps> = ({ gameState, onEndTurn, onBuild, o
                         const isWonder = type === StructureType.WONDER;
                         const hasWonder = isWonder && gameState.wonderOwner !== undefined;
                         
+                        const energyCost = isMMO ? (buildTab === 'UNITS' ? MMO_CONFIG.ENERGY_COST.BUILD_UNIT : MMO_CONFIG.ENERGY_COST.BUILD_STRUCTURE) : 0;
+                        const hasEnergy = isMMO ? displayedPlayer.energy >= energyCost : true;
+
                         // Strict Naval Rules for UI State
                         const hasSeafaring = displayedPlayer.techs.includes(TechType.SEAFARING);
                         const hasPort = (Object.values(gameState.tiles) as Tile[]).some(t => t.controller === displayedPlayer.color && t.structure === StructureType.PORT);
@@ -384,7 +405,7 @@ export const GameUI: React.FC<GameUIProps> = ({ gameState, onEndTurn, onBuild, o
 
                         const isSelected = selectedAction?.id === type;
                         // Disable logic
-                        const disabled = !canAfford || (isWonder && hasWonder) || isRestricted;
+                        const disabled = !canAfford || (isWonder && hasWonder) || isRestricted || !hasEnergy;
 
                         return (
                             <button
@@ -408,7 +429,8 @@ export const GameUI: React.FC<GameUIProps> = ({ gameState, onEndTurn, onBuild, o
                                     <div className="flex gap-2 text-[10px] text-slate-400">
                                         {Object.entries(cost).map(([r, amt]: [any, any]) => amt > 0 && <span key={r}>{amt}{r[0]}</span>)}
                                     </div>
-                                    {/* Show naval restriction reason */}
+                                    {isMMO && <span className="text-[10px] text-yellow-300 font-bold flex items-center"><Zap size={10}/> {energyCost}</span>}
+                                    
                                     {isRestricted && <span className="text-[10px] text-red-400 font-bold">{navalReason}</span>}
                                     {isSelected && <span className="text-[10px] text-indigo-400 font-bold animate-pulse">SELECTED</span>}
                                     {stats.description && !isRestricted && <span className="text-[9px] text-slate-500 ml-auto italic">{stats.description}</span>}
@@ -431,7 +453,7 @@ export const GameUI: React.FC<GameUIProps> = ({ gameState, onEndTurn, onBuild, o
          </div>}
       </div>
 
-      {(!isAI || isOnline) && (
+      {(!isAI || isOnline) && !isMMO && (
           <button 
             onClick={onEndTurn} 
             disabled={(!isMyTurn && isOnline) || gameState.isProcessing}
@@ -444,6 +466,13 @@ export const GameUI: React.FC<GameUIProps> = ({ gameState, onEndTurn, onBuild, o
             {!gameState.isProcessing && isMyTurn && <SkipForward size={20} />}
             {gameState.isProcessing && <Loader2 size={20} className="animate-spin" />}
           </button>
+      )}
+      
+      {isMMO && (
+          <div className="w-full py-4 font-bold rounded-xl shadow-lg bg-slate-800 text-slate-400 border border-slate-700 flex items-center justify-center gap-2">
+              <Zap size={18} className="text-yellow-400 animate-pulse" />
+              <span>Real-Time Mode Active</span>
+          </div>
       )}
     </div>
   );

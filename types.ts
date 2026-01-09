@@ -7,6 +7,11 @@ export enum PlayerColor {
   YELLOW = 'YELLOW' // The Masons
 }
 
+export enum GameMode {
+  TURN_BASED = 'TURN_BASED',
+  MMO = 'MMO' // Real-time strategy
+}
+
 export enum MapType {
   PANGAEA = 'PANGAEA', // One big landmass
   ARCHIPELAGO = 'ARCHIPELAGO', // Many islands
@@ -81,6 +86,8 @@ export interface Player {
   activeUnits: number;
   eliminated: boolean;
   techs: TechType[]; // New Tech Tree
+  energy: number; // For MMO mode
+  maxEnergy: number; // For MMO mode
   id?: string; 
 }
 
@@ -107,8 +114,9 @@ export interface HistoryPoint {
 }
 
 export interface GameState {
-  turn: number;
-  currentPlayerIndex: number;
+  mode: GameMode;
+  turn: number; // In MMO mode, this counts "Era" or days
+  currentPlayerIndex: number; // Ignored in MMO mode
   players: Player[];
   tiles: Record<string, Tile>;
   units: Record<string, Unit>;
@@ -118,6 +126,7 @@ export interface GameState {
   isProcessing: boolean;
   matchId?: string;
   lastUpdated?: number;
+  lastTick?: number; // Timestamp of last MMO resource tick
   visibleHexes?: string[]; // IDs of hexes visible to the local player/current player
   effects: FloatingText[]; // Visual only
   wonderBuiltAt?: number; // Turn number when Wonder was finished

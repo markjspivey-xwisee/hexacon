@@ -117,13 +117,14 @@ const WallOverlay: React.FC<{
     );
 };
 
-// --- Structure & Badge Overlay ---
-const StructureOverlay: React.FC<{
+// --- Top Layer Overlay (Structure + Icons + Roads) ---
+const TopLayerOverlay: React.FC<{
     tile: Tile;
+    neighbors: (Tile | null)[];
     isVisible: boolean;
     defenseBonus: number;
     onHover: (data: TooltipData | null) => void;
-}> = ({ tile, isVisible, defenseBonus, onHover }) => {
+}> = ({ tile, neighbors, isVisible, defenseBonus, onHover }) => {
     const { x, y } = hexToPixel(tile);
     if (!isVisible) return null;
 
@@ -138,9 +139,68 @@ const StructureOverlay: React.FC<{
         onHover({ title: "Defense Bonus", desc: `+${defenseBonus} Defense${wallBonus}` });
     };
 
+    // --- Road Logic (Restricted to same controller) ---
+    const RoadNetwork = () => {
+        if ((!tile.hasRoad && !tile.structure && !tile.isHQ)) return null;
+        if (!tile.hasRoad && tile.structure === StructureType.MONOLITH) return null; 
+  
+        const roadEndPoints = [
+            { x: HEX_SIZE * 0.75, y: HEX_SIZE * 0.433 },
+            { x: HEX_SIZE * 0.75, y: -HEX_SIZE * 0.433 },
+            { x: 0, y: -HEX_SIZE * 0.866 },
+            { x: -HEX_SIZE * 0.75, y: -HEX_SIZE * 0.433 },
+            { x: -HEX_SIZE * 0.75, y: HEX_SIZE * 0.433 },
+            { x: 0, y: HEX_SIZE * 0.866 },
+        ];
+  
+        const connections = neighbors.map((n, idx) => {
+            if (!n) return null;
+            // Only connect road if neighbor belongs to same player
+            const isFriendly = n.controller === tile.controller;
+            const hasInfrastructure = n.hasRoad || (n.structure && n.structure !== StructureType.MONOLITH) || n.isHQ;
+            
+            if (isFriendly && hasInfrastructure) {
+               const pt = roadEndPoints[idx];
+               return <line key={`road-${idx}`} x1={0} y1={0} x2={pt.x} y2={pt.y} stroke="#f1f5f9" strokeWidth="8" strokeLinecap="round" opacity={0.7} />;
+            }
+            return null;
+        });
+  
+        return (
+            <g className="pointer-events-none">
+                {connections}
+                <circle r={7} fill="#f1f5f9" opacity={0.7} />
+            </g>
+        );
+    };
+
+    // --- Terrain Icon ---
+    const TerrainIconElement = () => {
+        if (tile.structure === StructureType.MONOLITH) return <Gem size={32} x={-16} y={-16} className="text-violet-400 drop-shadow-[0_0_15px_rgba(167,139,250,0.6)]" />;
+        if (tile.structure === StructureType.WONDER) return <Star size={32} x={-16} y={-16} className="text-yellow-400 drop-shadow-[0_0_15px_rgba(234,179,8,0.8)]" fill="currentColor" />;
+        
+        const iconProps = { size: 24, x: -12, y: -12, className: "opacity-40 text-slate-200" };
+        switch (tile.resource) {
+          case 'WOOD': return <Trees {...iconProps} />;
+          case 'ORE': return <Mountain {...iconProps} />;
+          case 'WHEAT': return <Wheat {...iconProps} />;
+          case 'BRICK': return <BrickWall {...iconProps} />;
+          default: return null;
+        }
+    };
+
     return (
         <g transform={`translate(${x}, ${y})`} className="pointer-events-none">
-             {/* Structures - Enable pointer events for hover */}
+             
+             {/* 1. Roads (Bottom of Top Layer) */}
+             <RoadNetwork />
+
+             {/* 2. Terrain Icons */}
+             <g className="pointer-events-none">
+                <TerrainIconElement />
+             </g>
+
+             {/* 3. Structures - Enable pointer events for hover */}
              {(tile.structure || tile.hasRoad) && tile.structure !== StructureType.MONOLITH && tile.structure !== StructureType.WONDER && (
                 <g transform="translate(0, -20)" className="pointer-events-auto" onMouseEnter={handleStructureHover} onMouseLeave={() => onHover(null)}>
                     {tile.isHQ && <Castle size={20} x={-10} y={-10} className="text-white drop-shadow-md" fill={PLAYER_COLORS[tile.controller!]} />}
@@ -158,7 +218,7 @@ const StructureOverlay: React.FC<{
                  </g>
              )}
 
-             {/* Terrain Defense Shield (Tile property) */}
+             {/* 4. Terrain Defense Shield (Tile property) */}
              {(defenseBonus > 0 || tile.hasWall) && (
                  <g transform="translate(10, -22)" className="pointer-events-auto" onMouseEnter={handleDefHover} onMouseLeave={() => onHover(null)}>
                     <circle r={9} fill="#1e293b" stroke="#475569" strokeWidth={1} />
@@ -169,18 +229,16 @@ const StructureOverlay: React.FC<{
     );
 };
 
-// 1. Base Tile Renderer
+// 1. Base Tile Renderer (Simplified)
 const HexTileBase: React.FC<{
   tile: Tile;
-  neighbors: (Tile | null)[]; 
   isVisible: boolean;
   onClick: () => void;
   cursorClass: string;
   isCombating: boolean;
   onHover: (data: TooltipData | null) => void;
-}> = ({ tile, neighbors, isVisible, onClick, cursorClass, isCombating, onHover }) => {
+}> = ({ tile, isVisible, onClick, cursorClass, isCombating, onHover }) => {
   const { x, y } = hexToPixel(tile);
-  
   const points = useMemo(() => getHexPointsString(HEX_SIZE), []);
   
   let fillColor = RESOURCE_COLORS[tile.resource] || '#94a3b8';
@@ -211,55 +269,7 @@ const HexTileBase: React.FC<{
           baseInfo.title = "Ancient Wonder";
           baseInfo.desc = "Victory Condition";
       }
-
       onHover(baseInfo);
-  };
-
-  const RoadNetwork = () => {
-      if (!isVisible || (!tile.hasRoad && !tile.structure && !tile.isHQ)) return null;
-      if (!tile.hasRoad && tile.structure === StructureType.MONOLITH) return null; 
-
-      const roadEndPoints = [
-          { x: HEX_SIZE * 0.75, y: HEX_SIZE * 0.433 },
-          { x: HEX_SIZE * 0.75, y: -HEX_SIZE * 0.433 },
-          { x: 0, y: -HEX_SIZE * 0.866 },
-          { x: -HEX_SIZE * 0.75, y: -HEX_SIZE * 0.433 },
-          { x: -HEX_SIZE * 0.75, y: HEX_SIZE * 0.433 },
-          { x: 0, y: HEX_SIZE * 0.866 },
-      ];
-
-      const connections = neighbors.map((n, idx) => {
-          if (!n) return null;
-          const connect = n.hasRoad || (n.structure && n.structure !== StructureType.MONOLITH) || n.isHQ;
-          if (connect) {
-             const pt = roadEndPoints[idx];
-             return <line key={`road-${idx}`} x1={0} y1={0} x2={pt.x} y2={pt.y} stroke="#f1f5f9" strokeWidth="8" strokeLinecap="round" opacity={0.7} />;
-          }
-          return null;
-      });
-
-      return (
-          <g className="pointer-events-none">
-              {connections}
-              <circle r={7} fill="#f1f5f9" opacity={0.7} />
-          </g>
-      );
-  };
-
-  const TerrainIconElement = () => {
-    if (!isVisible) return <EyeOff size={20} x={-10} y={-10} className="text-slate-700 opacity-20" />;
-    
-    if (tile.structure === StructureType.MONOLITH) return <Gem size={32} x={-16} y={-16} className="text-violet-400 drop-shadow-[0_0_15px_rgba(167,139,250,0.6)]" />;
-    if (tile.structure === StructureType.WONDER) return <Star size={32} x={-16} y={-16} className="text-yellow-400 drop-shadow-[0_0_15px_rgba(234,179,8,0.8)]" fill="currentColor" />;
-    
-    const iconProps = { size: 24, x: -12, y: -12, className: "opacity-40 text-slate-200" };
-    switch (tile.resource) {
-      case 'WOOD': return <Trees {...iconProps} />;
-      case 'ORE': return <Mountain {...iconProps} />;
-      case 'WHEAT': return <Wheat {...iconProps} />;
-      case 'BRICK': return <BrickWall {...iconProps} />;
-      default: return null;
-    }
   };
 
   return (
@@ -276,13 +286,13 @@ const HexTileBase: React.FC<{
               <path d="M-10,5 Q0,15 10,5" stroke="white" fill="none" strokeWidth="2" />
           </g>
       )}
-      <RoadNetwork />
+      
       {!isVisible && (
           <g>
             <polygon points={points} fill="url(#fogCloud)" fillOpacity={0.6} className="pointer-events-none" />
+            <EyeOff size={20} x={-10} y={-10} className="text-slate-700 opacity-20 pointer-events-none" />
           </g>
       )}
-      <g className="pointer-events-none"><TerrainIconElement /></g>
     </g>
   );
 };
@@ -310,7 +320,6 @@ export const HexGrid: React.FC<HexGridProps> = ({ gameState, onTileClick, validM
     const handleMouseMove = (e: React.MouseEvent) => {
         // Tooltip Following
         if (tooltipRef.current) {
-             // Offset tooltip slightly from cursor
              tooltipRef.current.style.transform = `translate(${e.clientX + 15}px, ${e.clientY + 15}px)`;
         }
 
@@ -334,7 +343,6 @@ export const HexGrid: React.FC<HexGridProps> = ({ gameState, onTileClick, validM
     const edgeToNeighborIndex = [0, 5, 4, 3, 2, 1];
 
     const handleSetTooltip = (data: TooltipData | null) => {
-        // Simple debounce/check to prevent flickering
         if (!data) {
             setTooltipContent(null);
             return;
@@ -377,9 +385,8 @@ export const HexGrid: React.FC<HexGridProps> = ({ gameState, onTileClick, validM
              </pattern>
            </defs>
            <g>
-             {/* 1. Base Layer: Tiles & Content */}
+             {/* 1. Base Layer: Tiles Only */}
              {Object.values(gameState.tiles).map((tile: Tile) => {
-               const neighbors = getNeighbors(tile).map(n => gameState.tiles[getHexId(n.q, n.r, n.s)] || null);
                const isVisible = gameState.visibleHexes?.includes(tile.id) ?? false;
                
                let cursorClass = "cursor-default";
@@ -396,7 +403,6 @@ export const HexGrid: React.FC<HexGridProps> = ({ gameState, onTileClick, validM
                  <HexTileBase 
                    key={tile.id}
                    tile={tile}
-                   neighbors={neighbors}
                    isVisible={isVisible}
                    onClick={() => onTileClick(tile.id)}
                    cursorClass={cursorClass}
@@ -413,7 +419,7 @@ export const HexGrid: React.FC<HexGridProps> = ({ gameState, onTileClick, validM
                 return <WallOverlay key={`wall-${tile.id}`} tile={tile} neighbors={neighbors} isVisible={isVisible} onHover={handleSetTooltip} />;
             })}
 
-             {/* 3. Overlay Layer: Borders */}
+             {/* 3. Middle Layer: Borders */}
              {Object.values(gameState.tiles).map((tile: Tile) => {
                 const isVisible = gameState.visibleHexes?.includes(tile.id) ?? false;
                 if (!isVisible || !tile.controller) return null;
@@ -456,16 +462,18 @@ export const HexGrid: React.FC<HexGridProps> = ({ gameState, onTileClick, validM
                 );
              })}
              
-             {/* 4. Structures & Badges */}
+             {/* 4. Top Layer: Structures, Roads, Icons (Above Borders) */}
              {Object.values(gameState.tiles).map((tile: Tile) => {
+                 const neighbors = getNeighbors(tile).map(n => gameState.tiles[getHexId(n.q, n.r, n.s)] || null);
                  const isVisible = gameState.visibleHexes?.includes(tile.id) ?? false;
                  let defenseBonus = TERRAIN_DEFENSE[tile.resource] || 0;
                  if (tile.hasWall) defenseBonus += 3;
 
                  return (
-                     <StructureOverlay 
+                     <TopLayerOverlay 
                         key={`struct-${tile.id}`} 
                         tile={tile} 
+                        neighbors={neighbors}
                         isVisible={isVisible} 
                         defenseBonus={defenseBonus}
                         onHover={handleSetTooltip}
@@ -513,8 +521,12 @@ export const HexGrid: React.FC<HexGridProps> = ({ gameState, onTileClick, validM
 
                   return (
                       <g key={unit.id} transform={`translate(${x}, ${y})`} className="pointer-events-none transition-all duration-300">
-                          {/* Unit Circle - Enable pointer for hover */}
-                          <g className="pointer-events-auto" 
+                          {/* Unit Circle - Enable pointer for hover AND click */}
+                          <g className="pointer-events-auto cursor-pointer" 
+                             onClick={(e) => {
+                                 e.stopPropagation();
+                                 onTileClick(tile.id);
+                             }}
                              onMouseEnter={() => handleSetTooltip({ title: unit.type, desc: `${unit.owner} Faction`, sub: isMyUnit ? "Your Unit" : "Enemy Unit" })}
                              onMouseLeave={() => handleSetTooltip(null)}
                           >
@@ -563,7 +575,7 @@ export const HexGrid: React.FC<HexGridProps> = ({ gameState, onTileClick, validM
               })}
   
              {gameState.effects.map(effect => (
-                 <text key={effect.id} x={effect.x} y={effect.y} fill={effect.color} fontSize="14" fontWeight="bold" textAnchor="middle" className="pointer-events-none animate-bounce" style={{ textShadow: '0px 2px 2px rgba(0,0,0,0.8)' }}>
+                 <text key={effect.id} x={effect.x} y={effect.y} fill={effect.color} fontSize="14" fontWeight="bold" textAnchor="middle" className="pointer-events-none animate-float" style={{ textShadow: '0px 2px 2px rgba(0,0,0,0.8)' }}>
                      {effect.text}
                  </text>
              ))}

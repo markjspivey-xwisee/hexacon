@@ -2,8 +2,8 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useGameEngine } from './hooks/useGameEngine';
 import { HexGrid } from './components/HexGrid';
 import { GameUI } from './components/GameUI';
-import { UnitType, PlayerColor, Tile, Player, StructureType, Unit, MapType } from './types';
-import { Sword, Users, Monitor, Info, Globe, Play, Cloud, RotateCcw, AlertTriangle, Loader2, X, ClipboardCopy, Link as LinkIcon, Share2, Menu, LogIn, Key, BarChart3, Trophy, Skull, HelpCircle, Settings, Bot, Map, ShieldAlert, Check, Footprints, Shield, Compass, Axe, Crown, Ship, User, Trees, Mountain, Wheat, Droplets, BrickWall, Home, Building2, Anchor, Star, Gem, Milestone } from 'lucide-react';
+import { UnitType, PlayerColor, Tile, Player, StructureType, Unit, MapType, GameMode } from './types';
+import { Sword, Users, Monitor, Info, Globe, Play, Cloud, RotateCcw, AlertTriangle, Loader2, X, ClipboardCopy, Link as LinkIcon, Share2, Menu, LogIn, Key, BarChart3, Trophy, Skull, HelpCircle, Settings, Bot, Map, ShieldAlert, Check, Footprints, Shield, Compass, Axe, Crown, Ship, User, Trees, Mountain, Wheat, Droplets, BrickWall, Home, Building2, Anchor, Star, Gem, Milestone, Clock } from 'lucide-react';
 import { getNeighbors, getHexId } from './utils/hexUtils';
 import { PLAYER_BG_COLORS, PLAYER_COLORS, FACTION_INFO, TERRAIN_DEFENSE, STRUCTURE_STATS, TERRAIN_TYPE } from './constants';
 
@@ -38,6 +38,7 @@ const App: React.FC = () => {
   const [isMobile, setIsMobile] = useState(window.innerWidth < 1024);
   const [playerCount, setPlayerCount] = useState(2);
   const [mapType, setMapType] = useState<MapType>(MapType.PANGAEA);
+  const [gameMode, setGameMode] = useState<GameMode>(GameMode.TURN_BASED);
   const [selectedFaction, setSelectedFaction] = useState<PlayerColor>(PlayerColor.RED);
 
   useEffect(() => {
@@ -65,7 +66,7 @@ const App: React.FC = () => {
     if (gameState.selectedHexId && !buildItem) {
         const tile = gameState.tiles[gameState.selectedHexId];
         const unit = tile?.unitId ? gameState.units[tile.unitId] : null;
-        if (unit && unit.movesLeft > 0) {
+        if (unit && (gameState.mode === GameMode.MMO || unit.movesLeft > 0)) {
             getNeighbors(tile).forEach(n => {
                 const nId = getHexId(n.q, n.r, n.s);
                 const neighborTile = gameState.tiles[nId];
@@ -77,7 +78,7 @@ const App: React.FC = () => {
         }
     }
     return { validMoves: moves, validAttacks: attacks };
-  }, [gameState.selectedHexId, gameState.tiles, gameState.units, buildItem]);
+  }, [gameState.selectedHexId, gameState.tiles, gameState.units, buildItem, gameState.mode]);
 
   const handleBuildSelect = (id: string, category: 'UNIT' | 'STRUCTURE') => {
     // Allow toggle/deselect
@@ -87,7 +88,16 @@ const App: React.FC = () => {
   const handleTileClick = (hexId: string) => {
     // Disable interactions in spectator mode or combat
     if (isSpectatorMode || gameState.combatResult) return;
-    if (isOnline && gameState.players[gameState.currentPlayerIndex].color !== localPlayerColor) return;
+    
+    // In MMO mode, local player check is slightly different (handled in engine), but for UI feedback:
+    if (isOnline) {
+        // Find local player object
+        const p = gameState.players.find(p => p.color === localPlayerColor);
+        if (!p) return;
+        // In MMO, turns don't matter. In TB, they do.
+        if (gameState.mode !== GameMode.MMO && gameState.players[gameState.currentPlayerIndex].color !== localPlayerColor) return;
+    }
+
     if (buildItem) {
       handleConstruct(buildItem.id, buildItem.category, hexId);
       setBuildItem(null);
@@ -153,7 +163,7 @@ const App: React.FC = () => {
 
   // Helper for Unit Card Icon
   const getUnitIcon = (type: UnitType) => {
-      const props = { size: 32, className: "text-white" };
+      const props = { size: 28, className: "text-white" };
       switch(type) {
           case UnitType.SCOUT: return <Compass {...props} />;
           case UnitType.SOLDIER: return <User {...props} />;
@@ -166,7 +176,7 @@ const App: React.FC = () => {
   
   // Helper for Terrain Icon
   const getTerrainIcon = (type: string) => {
-      const props = { size: 20, className: "text-white opacity-80" };
+      const props = { size: 24, className: "text-white opacity-80" };
       switch(type) {
           case 'WOOD': return <Trees {...props} className="text-green-400" />;
           case 'BRICK': return <BrickWall {...props} className="text-red-400" />;
@@ -332,49 +342,61 @@ const App: React.FC = () => {
 
                 <div className="flex flex-col md:flex-row gap-4 items-stretch justify-between">
                     <div className="flex-1">
-                        <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-2">Players</p>
-                        <div className="flex justify-center gap-2">
-                            {[2, 3, 4].map(num => (
-                                <button
-                                    key={num}
-                                    onClick={() => setPlayerCount(num)}
-                                    className={`w-10 h-10 rounded-lg font-black text-sm border transition-all flex items-center justify-center
-                                        ${playerCount === num 
-                                            ? 'bg-white text-slate-900 border-white' 
-                                            : 'bg-slate-800 border-slate-700 text-slate-500 hover:border-slate-500'}`}
-                                >
-                                    {num}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                    <div className="flex-1">
-                        <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-2">Map Type</p>
+                        <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-2">Game Mode</p>
                         <div className="flex justify-center gap-1">
-                            {Object.values(MapType).map(t => (
+                            {Object.values(GameMode).map(m => (
                                 <button 
-                                    key={t}
-                                    onClick={() => setMapType(t)}
-                                    className={`px-2 py-2 rounded-lg text-[10px] font-bold border transition-all
-                                        ${mapType === t ? 'bg-white text-slate-900 border-white' : 'bg-slate-900 border-slate-800 text-slate-500'}`}
+                                    key={m}
+                                    onClick={() => setGameMode(m)}
+                                    className={`px-2 py-2 rounded-lg text-[10px] font-bold border transition-all flex-1
+                                        ${gameMode === m ? 'bg-white text-slate-900 border-white' : 'bg-slate-900 border-slate-800 text-slate-500'}`}
                                 >
-                                    {t}
+                                    {m === GameMode.TURN_BASED ? "Turn-Based" : "Real-Time (MMO)"}
                                 </button>
                             ))}
                         </div>
                     </div>
+                    {gameMode !== GameMode.MMO && (
+                        <div className="flex-1">
+                            <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-2">Players</p>
+                            <div className="flex justify-center gap-2">
+                                {[2, 3, 4].map(num => (
+                                    <button
+                                        key={num}
+                                        onClick={() => setPlayerCount(num)}
+                                        className={`w-10 h-10 rounded-lg font-black text-sm border transition-all flex items-center justify-center
+                                            ${playerCount === num 
+                                                ? 'bg-white text-slate-900 border-white' 
+                                                : 'bg-slate-800 border-slate-700 text-slate-500 hover:border-slate-500'}`}
+                                    >
+                                        {num}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                    {gameMode === GameMode.MMO && (
+                        <div className="flex-1 flex items-center justify-center">
+                            <div className="text-xs text-slate-400 font-bold bg-slate-900/50 p-2 rounded-lg border border-slate-700">
+                                Open Lobby (4 Slots)
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
 
             <div className="grid grid-cols-1 gap-4">
-                <button onClick={() => startGame(playerCount, mapType, selectedFaction)} className="flex items-center p-5 bg-slate-800 border border-slate-700 hover:border-indigo-500 rounded-2xl transition-all group shadow-lg">
+                <button 
+                    onClick={() => startGame(playerCount, mapType, selectedFaction)} 
+                    disabled={gameMode === GameMode.MMO} // Disable offline AI for MMO for now as AI isn't built for real-time
+                    className={`flex items-center p-5 border rounded-2xl transition-all group shadow-lg
+                    ${gameMode === GameMode.MMO ? 'bg-slate-900 border-slate-800 opacity-50 cursor-not-allowed' : 'bg-slate-800 border-slate-700 hover:border-indigo-500'}`}
+                >
                     <Monitor className="text-indigo-400 mr-4 group-hover:scale-110 transition-transform" size={28} />
-                    <div className="text-left"><span className="block font-bold">vs AI Advisor</span><span className="text-xs text-slate-500">Single Player ({playerCount}P)</span></div>
-                </button>
-
-                <button onClick={() => startSpectatorGame(playerCount, mapType)} className="flex items-center p-5 bg-slate-800 border border-slate-700 hover:border-purple-500 rounded-2xl transition-all group shadow-lg">
-                    <Bot className="text-purple-400 mr-4 group-hover:scale-110 transition-transform" size={28} />
-                    <div className="text-left"><span className="block font-bold">Watch AI Battle</span><span className="text-xs text-slate-500">Spectator Mode (All AI)</span></div>
+                    <div className="text-left">
+                        <span className="block font-bold">vs AI Advisor</span>
+                        <span className="text-xs text-slate-500">{gameMode === GameMode.MMO ? "Not available in Real-Time" : `Single Player (${playerCount}P)`}</span>
+                    </div>
                 </button>
 
                 <div className="p-5 bg-slate-800 border border-slate-700 rounded-2xl shadow-lg relative overflow-hidden">
@@ -389,8 +411,8 @@ const App: React.FC = () => {
                         <button onClick={() => setShowConfig(true)} className="p-2 text-slate-500 hover:text-white" title="Firebase Settings"><Settings size={18} /></button>
                     </div>
                     {savedMatchId && <button onClick={resumeLastGame} className="w-full py-3 mb-3 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-colors"><RotateCcw size={18} /> Resume Game</button>}
-                    <button onClick={() => startOnlineGame(playerCount, mapType, selectedFaction)} disabled={isCreatingGame} className="w-full py-3 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold mb-3 flex items-center justify-center gap-2 transition-colors">
-                        {isCreatingGame ? <Loader2 className="animate-spin" /> : <Cloud />} {isCreatingGame ? "Creating..." : `Start ${playerCount}P Match`}
+                    <button onClick={() => startOnlineGame(gameMode === GameMode.MMO ? 4 : playerCount, mapType, selectedFaction, gameMode)} disabled={isCreatingGame} className="w-full py-3 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold mb-3 flex items-center justify-center gap-2 transition-colors">
+                        {isCreatingGame ? <Loader2 className="animate-spin" /> : <Cloud />} {isCreatingGame ? "Creating..." : `Start ${gameMode === GameMode.MMO ? 'MMO World' : `${playerCount}P Match`}`}
                     </button>
                     <div className="flex gap-2">
                         <input type="text" placeholder="GAME ID" className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 uppercase font-bold text-white" value={joinId} onChange={(e) => setJoinId(e.target.value.toUpperCase())} />
@@ -468,30 +490,41 @@ const App: React.FC = () => {
       {/* Selected Tile Inspector (Mobile & Desktop) */}
       {selectedTile && (
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[100] animate-in slide-in-from-bottom-6 duration-300 pointer-events-none">
-             <div className="bg-slate-900/95 backdrop-blur-md border-2 border-slate-600 rounded-2xl p-4 shadow-2xl flex items-center gap-6 min-w-[340px] pointer-events-auto">
+             <div className="bg-slate-900/95 backdrop-blur-md border-2 border-slate-600 rounded-2xl p-4 shadow-2xl flex items-center gap-6 min-w-[340px] max-w-[90vw] pointer-events-auto">
                   
-                  {/* Left Side: Identity (Unit OR Terrain) */}
+                  {/* Close Button */}
+                  <button onClick={() => setGameState(prev => ({...prev, selectedHexId: null}))} className="absolute top-2 right-2 text-slate-400 hover:text-white bg-black/20 rounded-full p-1"><X size={14} /></button>
+
+                  {/* Inspector Logic: Primary is UNIT, Secondary is TERRAIN/STRUCTURE */}
+                  
+                  {/* Primary Icon */}
                   <div className={`w-16 h-16 rounded-full flex items-center justify-center border-4 border-white shadow-lg shrink-0 ${selectedUnit ? PLAYER_BG_COLORS[selectedUnit.owner] : 'bg-slate-700'}`}>
                        {selectedUnit ? getUnitIcon(selectedUnit.type) : getTerrainIcon(selectedTile.resource)}
                   </div>
 
                   <div className="flex-1 min-w-0">
-                      <div className="flex justify-between items-start mb-2">
-                          <div>
-                              <h3 className="text-lg font-black text-white uppercase leading-none truncate">
-                                  {selectedUnit ? selectedUnit.type : TERRAIN_TYPE[selectedTile.resource]}
-                              </h3>
-                              <p className={`text-xs font-bold uppercase opacity-90 truncate ${selectedUnit ? PLAYER_COLORS[selectedUnit.owner] : 'text-slate-400'}`}>
-                                  {selectedUnit ? `${selectedUnit.owner} Faction` : `${selectedTile.resource}`}
-                              </p>
+                      {/* Header Info */}
+                      <div className="flex flex-col items-start mb-2">
+                          <h3 className="text-lg font-black text-white uppercase leading-none truncate w-full">
+                              {selectedUnit ? selectedUnit.type : TERRAIN_TYPE[selectedTile.resource]}
+                          </h3>
+                          <div className="flex items-center gap-2 w-full">
+                                <p className={`text-xs font-bold uppercase opacity-90 truncate ${selectedUnit ? PLAYER_COLORS[selectedUnit.owner] : 'text-slate-400'}`}>
+                                    {selectedUnit ? `${selectedUnit.owner} Faction` : selectedTile.structure ? STRUCTURE_STATS[selectedTile.structure].name : `Empty ${TERRAIN_TYPE[selectedTile.resource]}`}
+                                </p>
+                                {/* Secondary Context Badge */}
+                                {selectedUnit && (
+                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 uppercase flex items-center gap-1">
+                                        {getTerrainIcon(selectedTile.resource)}
+                                        {TERRAIN_TYPE[selectedTile.resource]}
+                                    </span>
+                                )}
                           </div>
-                          {/* Close Button for Selection */}
-                          <button onClick={() => setGameState(prev => ({...prev, selectedHexId: null}))} className="text-slate-400 hover:text-white bg-black/20 rounded-full p-1"><X size={14} /></button>
                       </div>
 
                       {/* Stats Grid */}
                       <div className="flex gap-2">
-                           {/* Defense (Terrain + Wall + Unit) */}
+                           {/* Defense (Always relevant) */}
                            <div className="flex flex-col items-center bg-blue-900/40 p-1.5 rounded border border-blue-500/30 min-w-[50px]">
                                <Shield size={14} className="text-blue-400 mb-0.5" />
                                <span className="text-sm font-black text-white">
@@ -500,32 +533,32 @@ const App: React.FC = () => {
                                <span className="text-[8px] text-blue-200 uppercase font-bold">DEF</span>
                            </div>
 
-                           {/* Attack (Unit Only) */}
+                           {/* Unit Specific Stats */}
                            {selectedUnit && (
-                               <div className="flex flex-col items-center bg-red-900/40 p-1.5 rounded border border-red-500/30 min-w-[50px]">
-                                   <Sword size={14} className="text-red-400 mb-0.5" />
-                                   <span className="text-sm font-black text-white">{selectedUnit.attack}</span>
-                                   <span className="text-[8px] text-red-200 uppercase font-bold">ATK</span>
-                               </div>
+                               <>
+                                   <div className="flex flex-col items-center bg-red-900/40 p-1.5 rounded border border-red-500/30 min-w-[50px]">
+                                       <Sword size={14} className="text-red-400 mb-0.5" />
+                                       <span className="text-sm font-black text-white">{selectedUnit.attack}</span>
+                                       <span className="text-[8px] text-red-200 uppercase font-bold">ATK</span>
+                                   </div>
+                                   <div className="flex flex-col items-center bg-green-900/40 p-1.5 rounded border border-green-500/30 min-w-[50px]">
+                                       <Footprints size={14} className="text-green-400 mb-0.5" />
+                                       <span className="text-sm font-black text-white">{selectedUnit.movesLeft}</span>
+                                       <span className="text-[8px] text-green-200 uppercase font-bold">MOVE</span>
+                                   </div>
+                               </>
                            )}
 
-                           {/* Movement (Unit Only) */}
-                           {selectedUnit && (
-                               <div className="flex flex-col items-center bg-green-900/40 p-1.5 rounded border border-green-500/30 min-w-[50px]">
-                                   <Footprints size={14} className="text-green-400 mb-0.5" />
-                                   <span className="text-sm font-black text-white">{selectedUnit.movesLeft}</span>
-                                   <span className="text-[8px] text-green-200 uppercase font-bold">MOVE</span>
-                               </div>
-                           )}
-
-                           {/* Structure Info (If no Unit, or compact if unit exists) */}
+                           {/* Structure Info (Secondary if unit exists) */}
                            {selectedTile.structure && (
-                               <div className="flex flex-col items-center bg-yellow-900/40 p-1.5 rounded border border-yellow-500/30 min-w-[50px]">
+                               <div className={`flex flex-col items-center p-1.5 rounded border min-w-[50px] ${selectedUnit ? 'bg-slate-800 border-slate-700 opacity-80' : 'bg-yellow-900/40 border-yellow-500/30'}`}>
                                    {selectedTile.structure === StructureType.CITY ? <Building2 size={14} className="text-yellow-400 mb-0.5" /> :
                                     selectedTile.structure === StructureType.WONDER ? <Star size={14} className="text-yellow-400 mb-0.5" /> :
                                     selectedTile.structure === StructureType.MONOLITH ? <Gem size={14} className="text-purple-400 mb-0.5" /> :
                                     <Home size={14} className="text-yellow-400 mb-0.5" />}
-                                   <span className="text-[9px] font-bold text-white uppercase truncate max-w-[60px]">{STRUCTURE_STATS[selectedTile.structure].name}</span>
+                                   <span className="text-[9px] font-bold text-white uppercase truncate max-w-[60px]">
+                                       {selectedUnit ? "Base" : STRUCTURE_STATS[selectedTile.structure].name}
+                                   </span>
                                </div>
                            )}
                            

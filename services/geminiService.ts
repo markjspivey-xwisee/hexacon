@@ -83,9 +83,28 @@ export const getAIMove = async (gameState: GameState, playerColor: PlayerColor):
   const hasEconomics = player.techs.includes(TechType.ECONOMICS);
   const hasSeafaring = player.techs.includes(TechType.SEAFARING);
   
-  // Prioritize Seafaring if we are near water
+  // Prioritize Seafaring if we are near water or ISOLATED
   const adjacentToWater = myTiles.some(t => getNeighbors(t).some(n => gameState.tiles[getHexId(n.q,n.r,n.s)]?.resource === 'WATER'));
-  if (adjacentToWater && !hasSeafaring) {
+  
+  // Check for isolation (no path to unowned land)
+  const landTiles = myTiles.filter(t => t.resource !== 'WATER');
+  const hasFrontier = landTiles.some(t => {
+      return getNeighbors(t).some(n => {
+          const tile = gameState.tiles[getHexId(n.q,n.r,n.s)];
+          return tile && tile.resource !== 'WATER' && tile.controller !== playerColor;
+      });
+  });
+
+  // URGENT: If isolated and no Seafaring, prioritize it above all else
+  if (!hasFrontier && !hasSeafaring && adjacentToWater) {
+      const cost = TECH_STATS[TechType.SEAFARING].cost;
+      if (Object.entries(cost).every(([r, amt]) => player.resources[r as any] >= amt)) {
+          return { action: 'RESEARCH', techType: TechType.SEAFARING, reasoning: 'ESCAPING ISLAND' };
+      }
+  }
+
+  // Normal Tech Priority
+  if (adjacentToWater && !hasSeafaring && myTiles.length > 5) { // Mid-game seafaring
       const cost = TECH_STATS[TechType.SEAFARING].cost;
       if (Object.entries(cost).every(([r, amt]) => player.resources[r as any] >= amt)) {
           return { action: 'RESEARCH', techType: TechType.SEAFARING, reasoning: 'Unlocking Navy' };
@@ -128,8 +147,10 @@ export const getAIMove = async (gameState: GameState, playerColor: PlayerColor):
       // Terrain check
       const isShip = unit.type === UnitType.GALLEY;
       const isWater = targetTile.resource === 'WATER';
+
       if (isShip && !isWater) continue;
-      if (!isShip && isWater) continue;
+      // If NOT ship, can only enter water if Seafaring is researched
+      if (!isShip && isWater && !hasSeafaring) continue;
 
       let score = -1000;
 
@@ -213,7 +234,7 @@ export const getAIMove = async (gameState: GameState, playerColor: PlayerColor):
   if (myUnits.length < 10) {
      const recruitOrder = [UnitType.GENERAL, UnitType.KNIGHT, UnitType.SOLDIER, UnitType.SCOUT];
      
-     // Try to build Ship if possible
+     // Build Ships if Seafaring is unlocked
      if (hasSeafaring) {
          const cost = UNIT_STATS[UnitType.GALLEY].cost;
          if (Object.entries(cost).every(([r, amt]) => player.resources[r as any] >= amt)) {
@@ -273,6 +294,20 @@ export const getAIMove = async (gameState: GameState, playerColor: PlayerColor):
               buildHexId: roadCandidates[0].id,
               reasoning: 'Infrastructure'
           };
+      }
+  }
+
+  // Prioritize Port if coastal and Seafaring
+  if (hasSeafaring && adjacentToWater) {
+      const portCost = STRUCTURE_STATS[StructureType.PORT].cost;
+      if (Object.entries(portCost).every(([r, amt]) => player.resources[r as any] >= amt)) {
+           const coastalTile = myTiles.find(t => {
+               if (t.structure || t.resource === 'WATER') return false;
+               return getNeighbors(t).some(n => gameState.tiles[getHexId(n.q,n.r,n.s)]?.resource === 'WATER');
+           });
+           if (coastalTile) {
+               return { action: 'BUILD_STRUCTURE', structureType: StructureType.PORT, buildHexId: coastalTile.id, reasoning: 'Building Port' };
+           }
       }
   }
 
