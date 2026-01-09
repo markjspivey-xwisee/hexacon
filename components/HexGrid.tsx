@@ -1,8 +1,8 @@
 import React, { useMemo, useState, useRef } from 'react';
-import { GameState, PlayerColor, Tile, StructureType, UnitType, Unit } from '../types';
+import { GameState, PlayerColor, Tile, StructureType, UnitType, Unit, GameMode } from '../types';
 import { hexToPixel, getNeighbors, getHexId } from '../utils/hexUtils';
-import { HEX_SIZE, RESOURCE_COLORS, PLAYER_COLORS, TERRAIN_DEFENSE, MAX_MAP_RADIUS, STRUCTURE_STATS, TERRAIN_TYPE, UNIT_STATS } from '../constants';
-import { Trees, Mountain, Wheat, BrickWall, Castle, User, EyeOff, Shield, Home, Building2, Anchor, Gem, Sparkles, Star, Sword, Crown, Compass, Axe, Ship, Eye, UserX } from 'lucide-react';
+import { HEX_SIZE, RESOURCE_COLORS, PLAYER_COLORS, TERRAIN_DEFENSE, MAX_MAP_RADIUS, STRUCTURE_STATS, TERRAIN_TYPE, UNIT_STATS, MMO_CONFIG } from '../constants';
+import { Trees, Mountain, Wheat, BrickWall, Castle, User, EyeOff, Shield, Home, Building2, Anchor, Gem, Sparkles, Star, Sword, Crown, Compass, Axe, Ship, Eye, UserX, Zap } from 'lucide-react';
 
 interface HexGridProps {
   gameState: GameState;
@@ -10,6 +10,7 @@ interface HexGridProps {
   validMoves?: string[]; 
   validAttacks?: string[];
   localPlayerColor?: PlayerColor | null;
+  isBuilding?: boolean;
 }
 
 interface TooltipData {
@@ -237,7 +238,8 @@ const HexTileBase: React.FC<{
   cursorClass: string;
   isCombating: boolean;
   onHover: (data: TooltipData | null) => void;
-}> = ({ tile, isVisible, onClick, cursorClass, isCombating, onHover }) => {
+  pointerEvents: string;
+}> = ({ tile, isVisible, onClick, cursorClass, isCombating, onHover, pointerEvents }) => {
   const { x, y } = hexToPixel(tile);
   const points = useMemo(() => getHexPointsString(HEX_SIZE), []);
   
@@ -277,7 +279,7 @@ const HexTileBase: React.FC<{
        onClick={onClick} 
        onMouseEnter={handleTileHover} 
        onMouseLeave={() => onHover(null)} 
-       className={`${cursorClass} transition-all duration-200 ${isCombating ? 'shake-animation' : ''}`}
+       className={`${cursorClass} ${pointerEvents} transition-all duration-200 ${isCombating ? 'shake-animation' : ''}`}
     >
       <polygon points={points} fill={fillColor} stroke={stroke} strokeWidth={strokeWidth} />
       {isVisible && tile.resource === 'WATER' && (
@@ -297,7 +299,7 @@ const HexTileBase: React.FC<{
   );
 };
 
-export const HexGrid: React.FC<HexGridProps> = ({ gameState, onTileClick, validMoves = [], validAttacks = [], localPlayerColor }) => {
+export const HexGrid: React.FC<HexGridProps> = ({ gameState, onTileClick, validMoves = [], validAttacks = [], localPlayerColor, isBuilding = false }) => {
     const [pan, setPan] = useState({ x: 0, y: 0 });
     const [zoom, setZoom] = useState(1);
     const svgRef = useRef<SVGSVGElement>(null);
@@ -350,6 +352,8 @@ export const HexGrid: React.FC<HexGridProps> = ({ gameState, onTileClick, validM
         setTooltipContent(data);
     };
 
+    const isMMO = gameState.mode === GameMode.MMO;
+
     return (
       <div className="w-full h-full bg-slate-950 overflow-hidden cursor-move relative">
          {/* HTML Tooltip Overlay */}
@@ -388,15 +392,33 @@ export const HexGrid: React.FC<HexGridProps> = ({ gameState, onTileClick, validM
              {/* 1. Base Layer: Tiles Only */}
              {Object.values(gameState.tiles).map((tile: Tile) => {
                const isVisible = gameState.visibleHexes?.includes(tile.id) ?? false;
+               const isValidMove = validMoves.includes(tile.id);
+               const isValidAttack = validAttacks.includes(tile.id);
+               const isSelected = gameState.selectedHexId === tile.id;
                
                let cursorClass = "cursor-default";
+               let pointerEvents = "pointer-events-auto";
+
                if (isVisible) {
-                   if (validMoves.includes(tile.id)) cursorClass = "cursor-pointer hover:brightness-110";
-                   else if (validAttacks.includes(tile.id)) cursorClass = "cursor-crosshair hover:brightness-110";
-                   else if (gameState.selectedHexId === tile.id) cursorClass = "cursor-pointer brightness-110";
-                   else if (tile.unitId && gameState.units[tile.unitId].owner === gameState.players[gameState.currentPlayerIndex].color) cursorClass = "cursor-pointer";
+                   if (isValidMove) cursorClass = "cursor-pointer hover:brightness-110";
+                   else if (isValidAttack) cursorClass = "cursor-crosshair hover:brightness-110";
+                   else if (isSelected) cursorClass = "cursor-pointer brightness-110";
+                   else if (isBuilding) cursorClass = "cursor-pointer hover:brightness-110";
+                   else if (tile.unitId) {
+                       // UX Tweak: If tile has unit, and it's NOT a valid action target, disable tile pointer events
+                       // This forces the user to click the Unit Circle on top, matching the user request.
+                       pointerEvents = "pointer-events-none"; 
+                   }
                    else cursorClass = "cursor-pointer";
+               } else {
+                   pointerEvents = "pointer-events-none";
                }
+
+               // Force pointer events if it's a valid interaction target despite unit presence
+               if (isValidMove || isValidAttack || isSelected || isBuilding) {
+                   pointerEvents = "pointer-events-auto";
+               }
+
                const isCombating = gameState.combatResult?.tileId === tile.id;
 
                return (
@@ -408,6 +430,7 @@ export const HexGrid: React.FC<HexGridProps> = ({ gameState, onTileClick, validM
                    cursorClass={cursorClass}
                    isCombating={isCombating}
                    onHover={handleSetTooltip}
+                   pointerEvents={pointerEvents}
                  />
                );
              })}
@@ -519,17 +542,32 @@ export const HexGrid: React.FC<HexGridProps> = ({ gameState, onTileClick, validM
                   const showDetails = unit.revealed || isMyUnit;
                   const moveColor = "#22c55e"; 
 
+                  const handleUnitHover = () => {
+                      let desc = "";
+                      if (isMMO && isMyUnit) {
+                          desc = `Move Cost: ${MMO_CONFIG.ENERGY_COST.MOVE} Energy`;
+                      } else {
+                          desc = `${unit.owner} Faction`;
+                      }
+                      
+                      const sub = isMyUnit ? "Your Unit" : "Enemy Unit";
+                      handleSetTooltip({ title: unit.type, desc, sub });
+                  };
+
                   return (
                       <g key={unit.id} transform={`translate(${x}, ${y})`} className="pointer-events-none transition-all duration-300">
                           {/* Unit Circle - Enable pointer for hover AND click */}
+                          {/* Added pointer-events-auto to ensure this catches clicks over the underlying tile */}
                           <g className="pointer-events-auto cursor-pointer" 
                              onClick={(e) => {
                                  e.stopPropagation();
                                  onTileClick(tile.id);
                              }}
-                             onMouseEnter={() => handleSetTooltip({ title: unit.type, desc: `${unit.owner} Faction`, sub: isMyUnit ? "Your Unit" : "Enemy Unit" })}
+                             onMouseEnter={handleUnitHover}
                              onMouseLeave={() => handleSetTooltip(null)}
                           >
+                             {/* Transparent hit area larger than visual circle to improve clickability */}
+                             <circle r={18} fill="transparent" />
                              <circle r={14} fill={UNIT_BG_COLORS[unit.owner]} stroke="white" strokeWidth={2} className="drop-shadow-md" />
                              <Icon size={16} x={-8} y={-8} className="text-white" />
                           </g>
@@ -547,16 +585,18 @@ export const HexGrid: React.FC<HexGridProps> = ({ gameState, onTileClick, validM
                               </g>
                           )}
                           
-                          {/* Badge: Moves */}
-                          <g className="pointer-events-auto"
-                             onMouseEnter={() => handleSetTooltip({ title: "Moves Remaining", desc: `${unit.movesLeft} / ${unit.maxMoves} Moves` })}
-                             onMouseLeave={() => handleSetTooltip(null)}
-                          >
-                              <circle cx={10} cy={10} r={6} fill={moveColor} stroke="white" strokeWidth={1} />
-                              <text x={10} y={11} fontSize="9" fontWeight="bold" textAnchor="middle" dominantBaseline="middle" fill="white">
-                                  {unit.movesLeft}
-                              </text>
-                          </g>
+                          {/* Badge: Moves - HIDE IN MMO MODE */}
+                          {!isMMO && (
+                              <g className="pointer-events-auto"
+                                 onMouseEnter={() => handleSetTooltip({ title: "Moves Remaining", desc: `${unit.movesLeft} / ${unit.maxMoves} Moves` })}
+                                 onMouseLeave={() => handleSetTooltip(null)}
+                              >
+                                  <circle cx={10} cy={10} r={6} fill={moveColor} stroke="white" strokeWidth={1} />
+                                  <text x={10} y={11} fontSize="9" fontWeight="bold" textAnchor="middle" dominantBaseline="middle" fill="white">
+                                      {unit.movesLeft}
+                                  </text>
+                              </g>
+                          )}
 
                            {/* Badge: Defense */}
                            {showDetails && (

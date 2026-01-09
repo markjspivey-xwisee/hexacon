@@ -7,20 +7,29 @@ let app: FirebaseApp | null = null;
 let db: Firestore | null = null;
 let auth: Auth | null = null;
 
-// Safer JSON serializer that handles circular references
-const safeJsonStringify = (obj: any) => {
-    const cache = new Set();
-    return JSON.stringify(obj, (key, value) => {
-        if (typeof value === 'object' && value !== null) {
-            if (cache.has(value)) {
-                // Circular reference found, discard key
-                return;
+// Deep sanitize function to remove circular references, functions, and undefined values
+const deepSanitize = (obj: any, seen = new WeakSet()): any => {
+    if (obj === undefined) return undefined;
+    if (obj === null || typeof obj !== 'object') return obj;
+    
+    // Break circular references
+    if (seen.has(obj)) return null; 
+    seen.add(obj);
+
+    if (Array.isArray(obj)) {
+        return obj.map(v => deepSanitize(v, seen));
+    }
+
+    const res: any = {};
+    for (const key in obj) {
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+            const val = deepSanitize(obj[key], seen);
+            if (val !== undefined) {
+                res[key] = val;
             }
-            // Store value in our collection
-            cache.add(value);
         }
-        return value;
-    });
+    }
+    return res;
 };
 
 export const initFirebase = (config: any) => {
@@ -31,7 +40,6 @@ export const initFirebase = (config: any) => {
       // Check if config matches existing app options to avoid unnecessary re-init
       if (existingApp.options.apiKey !== config.apiKey || existingApp.options.projectId !== config.projectId) {
         console.log("[Firebase] Config mismatch detected. Replacing app instance...");
-        // Attempt to delete properly
         deleteApp(existingApp).catch(err => console.warn("Warning deleting stale app:", err.message));
         try {
             app = initializeApp(config);
@@ -48,11 +56,9 @@ export const initFirebase = (config: any) => {
       app = initializeApp(config);
     }
 
-    // Use initializeFirestore to allow undefined properties (prevents 400 "Invalid Argument" errors on save)
     try {
         db = initializeFirestore(app, { ignoreUndefinedProperties: true });
     } catch (e) {
-        // If already initialized, fallback to getFirestore
         db = getFirestore(app);
     }
     
@@ -73,16 +79,6 @@ const ensureAuth = async () => {
     } catch (error: any) {
       const code = error.code;
       console.warn(`[Firebase] Auth failed (${code}). Proceeding unauthenticated (Test Mode).`);
-      
-      // Detailed logging for common 400 errors in Auth
-      if (code === 'auth/operation-not-allowed') {
-          console.warn("Hint: Enable 'Anonymous' sign-in provider in Firebase Console > Authentication > Sign-in method.");
-      }
-      if (code === 'auth/configuration-not-found') {
-          console.warn("Hint: Check your API Key and Project ID. Identity Platform might not be enabled.");
-      }
-
-      // Return null to allow Firestore access if rules are open
       return null;
     }
   }
@@ -97,8 +93,6 @@ export const createOnlineGame = async (initialState: GameState, hostPlayerId: st
   
   const matchId = Math.random().toString(36).substring(2, 8).toUpperCase();
   const matchRef = doc(db, "matches", matchId);
-
-  // Host is always the first player in the initial state list, ensuring they get their chosen color
   const hostColor = initialState.players[0].color;
 
   const matchData: MatchData = {
@@ -108,17 +102,15 @@ export const createOnlineGame = async (initialState: GameState, hostPlayerId: st
   };
 
   try {
-    // Sanitize using safer stringify
-    const cleanData = JSON.parse(safeJsonStringify(matchData));
+    const cleanData = deepSanitize(matchData);
     await setDoc(matchRef, cleanData);
   } catch (e: any) {
     console.error("Firestore Write Error:", e);
-    // Explicitly handle the "undefined" field error if it somehow slips through config
     if (e.message && e.message.includes("undefined")) {
-        throw new Error("Game data contained undefined fields. Please refresh and try again.");
+        throw new Error("Game data contained undefined fields.");
     }
     if (e.code === 'permission-denied') {
-        throw new Error("Database permission denied. Enable Anonymous Auth in Firebase Console OR set Firestore Rules to test mode.");
+        throw new Error("Database permission denied. Check Rules.");
     }
     throw e;
   }
@@ -137,14 +129,11 @@ export const joinOnlineGame = async (matchId: string, playerId: string): Promise
 
     const data = snap.data() as MatchData;
     
-    // 1. Check if player already in game (Re-joining async)
     if (data.playerIds[playerId]) {
         return { success: true, color: data.playerIds[playerId] };
     }
 
-    // 2. Find open slot
     const occupiedColors = Object.values(data.playerIds);
-    // Get all potential player colors from the game state definition to ensure we match the host's setup
     const allColors = data.gameState.players.map(p => p.color);
     const availableColors = allColors.filter(c => !occupiedColors.includes(c));
 
@@ -154,7 +143,6 @@ export const joinOnlineGame = async (matchId: string, playerId: string): Promise
 
     const assignedColor = availableColors[0];
     
-    // 3. Register player
     await updateDoc(matchRef, {
         [`playerIds.${playerId}`]: assignedColor
     });
@@ -162,16 +150,12 @@ export const joinOnlineGame = async (matchId: string, playerId: string): Promise
     return { success: true, color: assignedColor };
   } catch (e: any) {
       console.error("Firestore Error:", e);
-      if (e.code === 'permission-denied') {
-          return { success: false, color: null, msg: "Database permission denied. Check Firebase Rules." };
-      }
       return { success: false, color: null, msg: e.message || "Join failed" };
   }
 };
 
 export const subscribeToMatch = (matchId: string, onUpdate: (data: MatchData) => void) => {
   if (!db) return () => {};
-  // Returns unsubscribe function
   return onSnapshot(doc(db, "matches", matchId), (doc) => {
     if (doc.exists()) {
       onUpdate(doc.data() as MatchData);
@@ -185,14 +169,11 @@ export const updateMatchState = async (matchId: string, newState: GameState) => 
   if (!db) return;
   const matchRef = doc(db, "matches", matchId);
   try {
-    // Sanitize state to remove circular dependencies using custom serializer
-    const cleanState = JSON.parse(safeJsonStringify(newState));
-    
+    const cleanState = deepSanitize(newState);
     await updateDoc(matchRef, {
       gameState: cleanState
     });
   } catch (e: any) {
-    // Suppress logs for expected permission issues to avoid console spam
     if (e.code !== 'permission-denied') {
         console.error("Failed to update match state:", e.message);
     }

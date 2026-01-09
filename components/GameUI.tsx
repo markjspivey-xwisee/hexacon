@@ -348,7 +348,8 @@ export const GameUI: React.FC<GameUIProps> = ({ gameState, onEndTurn, onBuild, o
                         const cost = stats.cost;
                         const hasTech = displayedPlayer.techs.includes(tech as TechType);
                         const canAfford = !hasTech && Object.entries(cost).every(([r, amt]: [any, any]) => displayedPlayer.resources[r as ResourceType] >= amt);
-                        const energyCost = isMMO ? MMO_CONFIG.ENERGY_COST.RESEARCH : 0;
+                        // NEW: Dynamic energy cost
+                        const energyCost = isMMO ? stats.energy : 0;
                         const hasEnergy = isMMO ? displayedPlayer.energy >= energyCost : true;
 
                         return (
@@ -385,7 +386,8 @@ export const GameUI: React.FC<GameUIProps> = ({ gameState, onEndTurn, onBuild, o
                         const isWonder = type === StructureType.WONDER;
                         const hasWonder = isWonder && gameState.wonderOwner !== undefined;
                         
-                        const energyCost = isMMO ? (buildTab === 'UNITS' ? MMO_CONFIG.ENERGY_COST.BUILD_UNIT : MMO_CONFIG.ENERGY_COST.BUILD_STRUCTURE) : 0;
+                        // NEW: Dynamic energy cost
+                        const energyCost = isMMO ? stats.energy : 0;
                         const hasEnergy = isMMO ? displayedPlayer.energy >= energyCost : true;
 
                         // Strict Naval Rules for UI State

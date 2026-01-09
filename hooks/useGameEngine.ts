@@ -591,7 +591,7 @@ export const useGameEngine = () => {
 
         const cost = TECH_STATS[tech].cost;
         const canAfford = RESOURCES.every(r => player.resources[r] >= cost[r]);
-        const energyCost = isMMO ? MMO_CONFIG.ENERGY_COST.RESEARCH : 0;
+        const energyCost = isMMO ? TECH_STATS[tech].energy : 0;
         const hasEnergy = isMMO ? player.energy >= energyCost : true;
 
         if (!canAfford) return { ...prev, gameLog: ["Not enough resources to research.", ...prev.gameLog] };
@@ -661,7 +661,7 @@ export const useGameEngine = () => {
         }
         
         // MMO Energy Check
-        const energyCost = isMMO ? (itemCategory === 'UNIT' ? MMO_CONFIG.ENERGY_COST.BUILD_UNIT : MMO_CONFIG.ENERGY_COST.BUILD_STRUCTURE) : 0;
+        const energyCost = isMMO ? (itemCategory === 'UNIT' ? UNIT_STATS[itemId as UnitType].energy : STRUCTURE_STATS[itemId as StructureType].energy) : 0;
         const hasEnergy = isMMO ? player.energy >= energyCost : true;
 
         const canAfford = RESOURCES.every(r => player.resources[r] >= cost[r]);

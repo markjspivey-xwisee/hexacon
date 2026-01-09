@@ -3,9 +3,9 @@ import { useGameEngine } from './hooks/useGameEngine';
 import { HexGrid } from './components/HexGrid';
 import { GameUI } from './components/GameUI';
 import { UnitType, PlayerColor, Tile, Player, StructureType, Unit, MapType, GameMode } from './types';
-import { Sword, Users, Monitor, Info, Globe, Play, Cloud, RotateCcw, AlertTriangle, Loader2, X, ClipboardCopy, Link as LinkIcon, Share2, Menu, LogIn, Key, BarChart3, Trophy, Skull, HelpCircle, Settings, Bot, Map, ShieldAlert, Check, Footprints, Shield, Compass, Axe, Crown, Ship, User, Trees, Mountain, Wheat, Droplets, BrickWall, Home, Building2, Anchor, Star, Gem, Milestone, Clock } from 'lucide-react';
+import { Sword, Users, Monitor, Info, Globe, Play, Cloud, RotateCcw, AlertTriangle, Loader2, X, ClipboardCopy, Link as LinkIcon, Share2, Menu, LogIn, Key, BarChart3, Trophy, Skull, HelpCircle, Settings, Bot, Map, ShieldAlert, Check, Footprints, Shield, Compass, Axe, Crown, Ship, User, Trees, Mountain, Wheat, Droplets, BrickWall, Home, Building2, Anchor, Star, Gem, Milestone, Clock, Zap } from 'lucide-react';
 import { getNeighbors, getHexId } from './utils/hexUtils';
-import { PLAYER_BG_COLORS, PLAYER_COLORS, FACTION_INFO, TERRAIN_DEFENSE, STRUCTURE_STATS, TERRAIN_TYPE } from './constants';
+import { PLAYER_BG_COLORS, PLAYER_COLORS, FACTION_INFO, TERRAIN_DEFENSE, STRUCTURE_STATS, TERRAIN_TYPE, MMO_CONFIG } from './constants';
 
 const DEFAULT_CONFIG_TEMPLATE = JSON.stringify({
   apiKey: "AIzaSyDXQ5E9E-rcXYauP9o72AJ_OFAxzpt6mZE",
@@ -442,6 +442,7 @@ const App: React.FC = () => {
   // Selected Logic for Mobile Inspector
   const selectedTile = gameState.selectedHexId ? gameState.tiles[gameState.selectedHexId] : null;
   const selectedUnit = selectedTile?.unitId ? gameState.units[selectedTile.unitId] : null;
+  const isMMO = gameState.mode === GameMode.MMO;
 
   return (
     <div className="flex h-screen bg-slate-950 overflow-hidden flex-col lg:flex-row relative">
@@ -541,11 +542,19 @@ const App: React.FC = () => {
                                        <span className="text-sm font-black text-white">{selectedUnit.attack}</span>
                                        <span className="text-[8px] text-red-200 uppercase font-bold">ATK</span>
                                    </div>
-                                   <div className="flex flex-col items-center bg-green-900/40 p-1.5 rounded border border-green-500/30 min-w-[50px]">
-                                       <Footprints size={14} className="text-green-400 mb-0.5" />
-                                       <span className="text-sm font-black text-white">{selectedUnit.movesLeft}</span>
-                                       <span className="text-[8px] text-green-200 uppercase font-bold">MOVE</span>
-                                   </div>
+                                   {isMMO ? (
+                                        <div className="flex flex-col items-center bg-yellow-900/40 p-1.5 rounded border border-yellow-500/30 min-w-[50px]">
+                                            <Zap size={14} className="text-yellow-400 mb-0.5" />
+                                            <span className="text-sm font-black text-white">{MMO_CONFIG.ENERGY_COST.MOVE}</span>
+                                            <span className="text-[8px] text-yellow-200 uppercase font-bold">COST</span>
+                                        </div>
+                                   ) : (
+                                        <div className="flex flex-col items-center bg-green-900/40 p-1.5 rounded border border-green-500/30 min-w-[50px]">
+                                            <Footprints size={14} className="text-green-400 mb-0.5" />
+                                            <span className="text-sm font-black text-white">{selectedUnit.movesLeft}</span>
+                                            <span className="text-[8px] text-green-200 uppercase font-bold">MOVE</span>
+                                        </div>
+                                   )}
                                </>
                            )}
 
@@ -697,7 +706,7 @@ const App: React.FC = () => {
 
         {buildItem && <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 bg-indigo-600 text-white px-6 py-2 rounded-full shadow-2xl font-bold text-sm animate-pulse">Select target tile for {buildItem.id}</div>}
 
-        <HexGrid gameState={gameState} onTileClick={handleTileClick} validMoves={validMoves} validAttacks={validAttacks} localPlayerColor={localPlayerColor} />
+        <HexGrid gameState={gameState} onTileClick={handleTileClick} validMoves={validMoves} validAttacks={validAttacks} localPlayerColor={localPlayerColor} isBuilding={!!buildItem} />
       </div>
 
       {/* Responsive Sidebar */}
